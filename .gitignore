@@ -25,3 +25,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# OpenVINO and Model binaries (large files)
+src-tauri/resources/openvino/*.dylib
+src-tauri/resources/openvino/*.so
+src-tauri/resources/models/*.bin
