@@ -259,15 +259,21 @@ pub fn run() {
                                 if !IS_PTT_ACTIVE.swap(true, Ordering::SeqCst) {
                                     set_tray_recording(true);
                                     start_ptt_recording();
+                                    // Émettre l'événement de statut pour le frontend
+                                    let _ = app.emit("recording-status", "recording");
                                 }
                             }
                             ShortcutState::Released => {
                                 println!("[PTT] Key RELEASED - Stopping recording");
                                 if IS_PTT_ACTIVE.swap(false, Ordering::SeqCst) {
                                     set_tray_recording(false);
+                                    // Émettre l'événement de traitement
+                                    let _ = app.emit("recording-status", "processing");
                                     let handle = app.clone();
                                     std::thread::spawn(move || {
                                         stop_ptt_and_paste(&handle);
+                                        // Émettre l'événement de fin
+                                        let _ = handle.emit("recording-status", "idle");
                                     });
                                 }
                             }
@@ -731,6 +737,20 @@ fn stop_ptt_and_paste(app: &tauri::AppHandle) {
     }
 
     log::info!("Transcribed: '{}'", result.text);
+
+    // Émettre le texte transcrit vers le frontend
+    #[derive(serde::Serialize, Clone)]
+    struct TranscriptionChunk {
+        text: String,
+        is_final: bool,
+        duration_seconds: f32,
+    }
+    let chunk = TranscriptionChunk {
+        text: result.text.clone(),
+        is_final: true,
+        duration_seconds: result.duration_seconds,
+    };
+    let _ = app.emit("transcription-chunk", chunk);
 
     // Sauvegarder dans l'historique
     let _ = storage::history::add_transcription(result.clone());

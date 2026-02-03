@@ -8,6 +8,7 @@ interface TranscriptionStore {
   history: TranscriptionResult[];
   error: string | null;
 
+  setStatus: (status: TranscriptionStatus) => void;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<TranscriptionResult>;
   loadHistory: () => Promise<void>;
@@ -22,6 +23,8 @@ export const useTranscriptionStore = create<TranscriptionStore>((set) => ({
   result: null,
   history: [],
   error: null,
+
+  setStatus: (status) => set({ status }),
 
   startRecording: async () => {
     try {

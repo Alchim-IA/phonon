@@ -6,10 +6,26 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { StreamingChunk } from '../types';
 
 export function DictationPanel() {
-  const { status, result, error, startRecording, stopRecording, clearError } = useTranscriptionStore();
+  const { status, result, error, startRecording, stopRecording, clearError, setStatus } = useTranscriptionStore();
   const { settings } = useSettingsStore();
   const [streamingText, setStreamingText] = useState<string>('');
   const [recordingDuration, setRecordingDuration] = useState<number>(0);
+
+  // Écouter les événements de statut PTT (push-to-talk)
+  useEffect(() => {
+    const unlistenStatus = listen<string>('recording-status', (event) => {
+      const newStatus = event.payload as 'idle' | 'recording' | 'processing';
+      setStatus(newStatus);
+      if (newStatus === 'recording') {
+        setStreamingText('');
+        setRecordingDuration(0);
+      }
+    });
+
+    return () => {
+      unlistenStatus.then((fn) => fn());
+    };
+  }, [setStatus]);
 
   // Écouter les événements de streaming
   useEffect(() => {
