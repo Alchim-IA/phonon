@@ -4,6 +4,7 @@ mod engines;
 mod state;
 mod storage;
 mod types;
+mod voice_commands;
 
 pub use audio::AudioCapture;
 pub use types::*;
