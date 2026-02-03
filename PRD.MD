@@ -471,3 +471,5 @@ impl Default for AppSettings {
 ---
 
 **Pour Claude Code:** Ce PRD contient toutes les spécifications nécessaires pour implémenter WakaScribe. Chaque section inclut du code fonctionnel prêt à être adapté.
+
+clé groq : REDACTED_GROQ_KEY

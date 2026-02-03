@@ -44,6 +44,9 @@ export interface AppSettings {
   streaming_enabled: boolean;
   auto_paste_enabled: boolean;
   floating_window_enabled: boolean;
+  translation_enabled: boolean;
+  translation_target_language: string;
+  hotkey_translate: string;
 }
 
 export interface AudioDevice {

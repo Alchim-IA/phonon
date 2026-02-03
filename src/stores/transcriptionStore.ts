@@ -13,6 +13,8 @@ interface TranscriptionStore {
   loadHistory: () => Promise<void>;
   clearHistory: () => Promise<void>;
   clearError: () => void;
+  resetRecordingState: () => Promise<void>;
+  initialize: () => Promise<void>;
 }
 
 export const useTranscriptionStore = create<TranscriptionStore>((set) => ({
@@ -26,8 +28,17 @@ export const useTranscriptionStore = create<TranscriptionStore>((set) => ({
       set({ status: 'recording', error: null });
       await invoke('start_recording');
     } catch (error) {
-      set({ status: 'error', error: String(error) });
-      throw error;
+      const errorStr = String(error);
+      // Si l'état est bloqué, réinitialiser et réessayer une fois
+      if (errorStr.includes('Already recording')) {
+        console.warn('Recording state was stuck, resetting...');
+        await invoke('reset_recording_state');
+        set({ status: 'recording', error: null });
+        await invoke('start_recording');
+      } else {
+        set({ status: 'error', error: errorStr });
+        throw error;
+      }
     }
   },
 
@@ -66,4 +77,23 @@ export const useTranscriptionStore = create<TranscriptionStore>((set) => ({
   },
 
   clearError: () => set({ error: null, status: 'idle' }),
+
+  resetRecordingState: async () => {
+    try {
+      await invoke('reset_recording_state');
+      set({ status: 'idle', error: null });
+    } catch (error) {
+      console.error('Failed to reset recording state:', error);
+    }
+  },
+
+  initialize: async () => {
+    try {
+      // Réinitialiser l'état d'enregistrement au démarrage
+      await invoke('reset_recording_state');
+      set({ status: 'idle', error: null });
+    } catch (error) {
+      console.error('Failed to initialize transcription store:', error);
+    }
+  },
 }));

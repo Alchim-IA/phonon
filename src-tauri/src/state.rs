@@ -13,6 +13,7 @@ pub struct AppState {
     pub engine: Arc<RwLock<Option<WhisperEngine>>>,
     pub model_manager: Arc<ModelManager>,
     pub resource_path: PathBuf,
+    pub audio_buffer: Arc<RwLock<Option<(Vec<f32>, u32)>>>,
 }
 
 impl AppState {
@@ -94,6 +95,7 @@ impl AppState {
             engine: Arc::new(RwLock::new(engine)),
             model_manager: Arc::new(model_manager),
             resource_path,
+            audio_buffer: Arc::new(RwLock::new(None)),
         })
     }
 

@@ -29,8 +29,14 @@ const defaultSettings: AppSettings = {
   whisper_model: 'tiny',
   llm_enabled: false,
   llm_mode: 'basic',
-  voice_commands_enabled: false,
+  voice_commands_enabled: true,
   dictation_mode: 'general',
+  streaming_enabled: true,
+  auto_paste_enabled: true,
+  floating_window_enabled: false,
+  translation_enabled: true,
+  translation_target_language: 'en',
+  hotkey_translate: 'CommandOrControl+Shift+T',
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({

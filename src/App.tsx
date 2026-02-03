@@ -3,6 +3,7 @@ import { DictationPanel } from './components/DictationPanel';
 import { TranscriptionHistory } from './components/TranscriptionHistory';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSettingsStore } from './stores/settingsStore';
+import { useTranscriptionStore } from './stores/transcriptionStore';
 import { useHotkeys } from './hooks/useHotkeys';
 
 type Tab = 'dictation' | 'history';
@@ -11,12 +12,14 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dictation');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { settings, loadSettings } = useSettingsStore();
+  const { initialize } = useTranscriptionStore();
 
   useHotkeys();
 
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    initialize(); // Réinitialiser l'état d'enregistrement au démarrage
+  }, [loadSettings, initialize]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden relative">

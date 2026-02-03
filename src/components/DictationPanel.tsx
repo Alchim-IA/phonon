@@ -1,10 +1,49 @@
+import { useEffect, useState } from 'react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { listen } from '@tauri-apps/api/event';
 import { useTranscriptionStore } from '../stores/transcriptionStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { StreamingChunk } from '../types';
 
 export function DictationPanel() {
   const { status, result, error, startRecording, stopRecording, clearError } = useTranscriptionStore();
   const { settings } = useSettingsStore();
+  const [streamingText, setStreamingText] = useState<string>('');
+  const [recordingDuration, setRecordingDuration] = useState<number>(0);
+
+  // Écouter les événements de streaming
+  useEffect(() => {
+    if (!settings?.streaming_enabled) return;
+
+    const unlistenChunk = listen<StreamingChunk>('transcription-chunk', (event) => {
+      const chunk = event.payload;
+      if (chunk.is_final) {
+        setStreamingText(chunk.text);
+      } else {
+        setStreamingText((prev) => prev + chunk.text);
+      }
+    });
+
+    return () => {
+      unlistenChunk.then((fn) => fn());
+    };
+  }, [settings?.streaming_enabled]);
+
+  // Compteur de durée pendant l'enregistrement
+  useEffect(() => {
+    if (status !== 'recording') {
+      return;
+    }
+
+    setStreamingText('');
+    setRecordingDuration(0);
+
+    const interval = setInterval(() => {
+      setRecordingDuration((prev) => prev + 0.1);
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [status]);
 
   const handleToggle = async () => {
     try {
@@ -102,19 +141,24 @@ export function DictationPanel() {
           )}
         </div>
 
-        {/* Waveform visualization placeholder */}
+        {/* Waveform visualization and duration */}
         {status === 'recording' && (
-          <div className="flex items-center justify-center gap-[2px] h-8">
-            {[...Array(20)].map((_, i) => (
-              <div
-                key={i}
-                className="w-[3px] bg-[var(--accent-cyan)] rounded-full waveform-bar"
-                style={{
-                  animationDelay: `${i * 50}ms`,
-                  height: '100%'
-                }}
-              />
-            ))}
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-[2px] h-8">
+              {[...Array(20)].map((_, i) => (
+                <div
+                  key={i}
+                  className="w-[3px] bg-[var(--accent-cyan)] rounded-full waveform-bar"
+                  style={{
+                    animationDelay: `${i * 50}ms`,
+                    height: '100%'
+                  }}
+                />
+              ))}
+            </div>
+            <div className="text-[0.7rem] text-[var(--text-muted)] font-mono text-center">
+              {recordingDuration.toFixed(1)}s
+            </div>
           </div>
         )}
 
@@ -136,6 +180,28 @@ export function DictationPanel() {
           </div>
         )}
       </div>
+
+      {/* Streaming text display */}
+      {settings?.streaming_enabled && (status === 'recording' || status === 'processing') && streamingText && (
+        <div className="panel w-full max-w-lg p-0 overflow-hidden border-[var(--border-subtle)]">
+          <div className="px-4 py-2 bg-[var(--bg-elevated)] border-b border-[var(--border-subtle)] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`led ${status === 'recording' ? 'recording' : 'processing'}`} />
+              <span className="text-[0.6rem] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+                {status === 'recording' ? 'Transcription en direct' : 'Finalisation...'}
+              </span>
+            </div>
+          </div>
+          <div className="p-4">
+            <p className="text-[var(--text-secondary)] text-sm leading-relaxed font-body italic">
+              {streamingText}
+              {status === 'recording' && (
+                <span className="inline-block w-2 h-4 bg-[var(--accent-cyan)] ml-1 animate-pulse" />
+              )}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Error display */}
       {error && (
