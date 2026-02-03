@@ -26,6 +26,7 @@ const defaultSettings: AppSettings = {
   minimize_to_tray: true,
   auto_copy_to_clipboard: true,
   notification_on_complete: true,
+  whisper_model: 'tiny',
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
