@@ -10,7 +10,7 @@ type Tab = 'dictation' | 'history';
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dictation');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { loadSettings } = useSettingsStore();
+  const { settings, loadSettings } = useSettingsStore();
 
   useHotkeys();
 
@@ -106,11 +106,15 @@ function App() {
       <footer className="flex-shrink-0 px-4 py-2 bg-[var(--bg-panel)] border-t border-[var(--border-subtle)] flex justify-between items-center">
         <div className="flex items-center gap-4">
           <span className="text-[0.65rem] text-[var(--text-muted)] uppercase tracking-wider">
-            OpenVINO · Parakeet TDT
+            Whisper.cpp
+            {settings?.dictation_mode && settings.dictation_mode !== 'general' && (
+              <> · {settings.dictation_mode === 'email' ? 'Email' : settings.dictation_mode === 'code' ? 'Code' : 'Notes'}</>
+            )}
+            {settings?.llm_enabled && <> · LLM</>}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="kbd">Ctrl+Shift+R</span>
+          <span className="kbd">⌘+Shift+Space</span>
           <span className="text-[0.65rem] text-[var(--text-muted)]">Push-to-talk</span>
         </div>
       </footer>
