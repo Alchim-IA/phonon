@@ -50,6 +50,16 @@ export function DictationPanel() {
           </>
         )}
 
+        {/* Outer ring animation for processing */}
+        {status === 'processing' && (
+          <>
+            <div className="absolute inset-0 rounded-full border-2 border-[var(--accent-magenta)] animate-pulse opacity-40"
+                 style={{ transform: 'scale(1.25)' }} />
+            <div className="absolute inset-0 rounded-full border border-[var(--accent-cyan)] opacity-30"
+                 style={{ transform: 'scale(1.4)', animation: 'spin 3s linear infinite' }} />
+          </>
+        )}
+
         <button
           onClick={handleToggle}
           disabled={status === 'processing'}
@@ -84,6 +94,12 @@ export function DictationPanel() {
           <span className="text-[0.7rem] uppercase tracking-[0.2em] text-[var(--text-secondary)] font-medium">
             {getStatusText()}
           </span>
+          {/* Badge LLM */}
+          {settings?.llm_enabled && (
+            <span className="px-1.5 py-0.5 text-[0.5rem] uppercase tracking-wider bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30 rounded">
+              LLM
+            </span>
+          )}
         </div>
 
         {/* Waveform visualization placeholder */}
@@ -99,6 +115,24 @@ export function DictationPanel() {
                 }}
               />
             ))}
+          </div>
+        )}
+
+        {/* Processing indicator */}
+        {status === 'processing' && (
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex items-center justify-center gap-1 h-8">
+              {[...Array(5)].map((_, i) => (
+                <div
+                  key={i}
+                  className="w-2 h-2 bg-[var(--accent-magenta)] rounded-full animate-bounce"
+                  style={{ animationDelay: `${i * 150}ms` }}
+                />
+              ))}
+            </div>
+            <span className="text-[0.6rem] text-[var(--text-muted)] uppercase tracking-wider">
+              Transcription en cours...
+            </span>
           </div>
         )}
       </div>
