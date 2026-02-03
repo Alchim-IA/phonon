@@ -108,6 +108,9 @@ pub struct AppSettings {
     pub auto_paste_enabled: bool,
     pub floating_window_enabled: bool,
     pub floating_window_position: Option<(i32, i32)>,
+    pub translation_enabled: bool,
+    pub translation_target_language: String,
+    pub hotkey_translate: String,
 }
 
 impl Default for AppSettings {
@@ -131,6 +134,9 @@ impl Default for AppSettings {
             auto_paste_enabled: true,
             floating_window_enabled: false,
             floating_window_position: None,
+            translation_enabled: true,
+            translation_target_language: "en".to_string(),
+            hotkey_translate: "CommandOrControl+Shift+T".to_string(),
         }
     }
 }

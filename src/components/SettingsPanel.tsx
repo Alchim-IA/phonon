@@ -374,6 +374,87 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             </div>
           </section>
 
+          {/* Translation Section */}
+          <section className="space-y-4">
+            <h3 className="text-[0.65rem] uppercase tracking-[0.2em] text-[var(--accent-yellow)] font-medium flex items-center gap-2">
+              <span className="w-8 h-px bg-[var(--accent-yellow)]/30" />
+              Traduction
+            </h3>
+
+            <div className="space-y-3">
+              {/* Toggle Traduction */}
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={settings.translation_enabled}
+                  onChange={(e) => updateSettings({ translation_enabled: e.target.checked })}
+                />
+                <span className="checkmark" />
+                <div>
+                  <span className="text-sm text-[var(--text-secondary)] block">
+                    Traduction instantanee
+                  </span>
+                  <span className="text-[0.6rem] text-[var(--text-muted)]">
+                    Traduit le texte du presse-papier via Groq
+                  </span>
+                </div>
+              </label>
+
+              {settings.translation_enabled && (
+                <>
+                  {/* Langue cible */}
+                  <div>
+                    <label className="text-[0.7rem] uppercase tracking-wider text-[var(--text-muted)] mb-2 block">
+                      Langue cible
+                    </label>
+                    <select
+                      value={settings.translation_target_language}
+                      onChange={(e) => updateSettings({ translation_target_language: e.target.value })}
+                      className="select-field w-full"
+                    >
+                      <option value="en">English</option>
+                      <option value="fr">Francais</option>
+                      <option value="de">Deutsch</option>
+                      <option value="es">Espanol</option>
+                      <option value="it">Italiano</option>
+                      <option value="pt">Portugues</option>
+                      <option value="nl">Nederlands</option>
+                      <option value="ru">Russkiy</option>
+                      <option value="zh">Zhongwen</option>
+                      <option value="ja">Nihongo</option>
+                      <option value="ko">Hangugeo</option>
+                      <option value="ar">Arabiy</option>
+                    </select>
+                  </div>
+
+                  {/* Raccourci traduction */}
+                  <div>
+                    <label className="text-[0.7rem] uppercase tracking-wider text-[var(--text-muted)] mb-2 block">
+                      Raccourci traduction
+                    </label>
+                    <HotkeyInput
+                      value={settings.hotkey_translate}
+                      onChange={(hotkey) => updateSettings({ hotkey_translate: hotkey })}
+                    />
+                    <p className="text-[0.6rem] text-[var(--text-muted)] mt-1">
+                      Copiez du texte, puis appuyez sur le raccourci pour traduire
+                    </p>
+                  </div>
+
+                  {/* Avertissement API */}
+                  {!apiKeyStatus && (
+                    <div className="p-2 border border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/5 rounded">
+                      <p className="text-[0.6rem] text-[var(--accent-yellow)]">
+                        ⚠️ Une cle API Groq est requise pour la traduction.
+                        Configurez-la dans la section Intelligence (LLM) ci-dessus.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+
           {/* Dictation Mode Section */}
           <section className="space-y-4">
             <h3 className="text-[0.65rem] uppercase tracking-[0.2em] text-[var(--accent-magenta)] font-medium flex items-center gap-2">
@@ -528,6 +609,67 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 <span className="text-sm text-[var(--text-secondary)]">
                   Minimiser dans la barre systeme
                 </span>
+              </label>
+            </div>
+          </section>
+
+          {/* System Integration Section */}
+          <section className="space-y-4">
+            <h3 className="text-[0.65rem] uppercase tracking-[0.2em] text-[var(--accent-yellow)] font-medium flex items-center gap-2">
+              <span className="w-8 h-px bg-[var(--accent-yellow)]/30" />
+              Integration Systeme
+            </h3>
+
+            <div className="space-y-3">
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={settings.streaming_enabled}
+                  onChange={(e) => updateSettings({ streaming_enabled: e.target.checked })}
+                />
+                <span className="checkmark" />
+                <div>
+                  <span className="text-sm text-[var(--text-secondary)] block">
+                    Streaming temps reel
+                  </span>
+                  <span className="text-[0.6rem] text-[var(--text-muted)]">
+                    Affiche le texte pendant l'enregistrement
+                  </span>
+                </div>
+              </label>
+
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={settings.auto_paste_enabled}
+                  onChange={(e) => updateSettings({ auto_paste_enabled: e.target.checked })}
+                />
+                <span className="checkmark" />
+                <div>
+                  <span className="text-sm text-[var(--text-secondary)] block">
+                    Coller automatiquement
+                  </span>
+                  <span className="text-[0.6rem] text-[var(--text-muted)]">
+                    Colle le texte dans l'app active apres transcription
+                  </span>
+                </div>
+              </label>
+
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={settings.floating_window_enabled}
+                  onChange={(e) => updateSettings({ floating_window_enabled: e.target.checked })}
+                />
+                <span className="checkmark" />
+                <div>
+                  <span className="text-sm text-[var(--text-secondary)] block">
+                    Fenetre flottante
+                  </span>
+                  <span className="text-[0.6rem] text-[var(--text-muted)]">
+                    Affiche une mini-fenetre toujours visible
+                  </span>
+                </div>
               </label>
             </div>
           </section>

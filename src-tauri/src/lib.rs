@@ -19,9 +19,14 @@ use tauri::{
     Emitter, Manager,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::process::{Command, Stdio};
+
+// Raccourcis globaux
+static PTT_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
+static TRANSLATE_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
 
 // État global pour le push-to-talk
 static IS_PTT_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -238,25 +243,43 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, _shortcut, event| {
-                    // On n'a qu'un seul raccourci enregistré, donc on réagit à tous les événements
-                    match event.state() {
-                        ShortcutState::Pressed => {
-                            println!("[PTT] Key PRESSED - Starting recording");
-                            if !IS_PTT_ACTIVE.swap(true, Ordering::SeqCst) {
-                                set_tray_recording(true);
-                                start_ptt_recording();
+                .with_handler(move |app, shortcut, event| {
+                    // Déterminer quel raccourci a été déclenché
+                    let is_ptt = PTT_SHORTCUT.lock().ok()
+                        .and_then(|guard| guard.as_ref().map(|s| *s == *shortcut))
+                        .unwrap_or(false);
+                    let is_translate = TRANSLATE_SHORTCUT.lock().ok()
+                        .and_then(|guard| guard.as_ref().map(|s| *s == *shortcut))
+                        .unwrap_or(false);
+
+                    if is_ptt {
+                        match event.state() {
+                            ShortcutState::Pressed => {
+                                println!("[PTT] Key PRESSED - Starting recording");
+                                if !IS_PTT_ACTIVE.swap(true, Ordering::SeqCst) {
+                                    set_tray_recording(true);
+                                    start_ptt_recording();
+                                }
+                            }
+                            ShortcutState::Released => {
+                                println!("[PTT] Key RELEASED - Stopping recording");
+                                if IS_PTT_ACTIVE.swap(false, Ordering::SeqCst) {
+                                    set_tray_recording(false);
+                                    let handle = app.clone();
+                                    std::thread::spawn(move || {
+                                        stop_ptt_and_paste(&handle);
+                                    });
+                                }
                             }
                         }
-                        ShortcutState::Released => {
-                            println!("[PTT] Key RELEASED - Stopping recording");
-                            if IS_PTT_ACTIVE.swap(false, Ordering::SeqCst) {
-                                set_tray_recording(false);
-                                let handle = app.clone();
-                                std::thread::spawn(move || {
-                                    stop_ptt_and_paste(&handle);
-                                });
-                            }
+                    } else if is_translate {
+                        // La traduction se déclenche sur le release
+                        if let ShortcutState::Released = event.state() {
+                            println!("[TRANSLATE] Shortcut released - Starting translation");
+                            let handle = app.clone();
+                            std::thread::spawn(move || {
+                                translate_clipboard_and_paste(&handle);
+                            });
                         }
                     }
                 })
@@ -274,6 +297,7 @@ pub fn run() {
             commands::get_history,
             commands::clear_history,
             commands::get_recording_status,
+            commands::reset_recording_state,
             commands::get_available_models,
             commands::get_current_model,
             commands::download_model,
@@ -285,7 +309,14 @@ pub fn run() {
             commands::has_groq_api_key,
             commands::validate_groq_api_key,
             commands::delete_groq_api_key,
+            commands::translate_text,
             commands::auto_paste,
+            commands::show_floating_window,
+            commands::hide_floating_window,
+            commands::toggle_floating_window,
+            commands::set_floating_window_size,
+            commands::get_floating_window_position,
+            commands::set_floating_window_position,
         ])
         .setup(|app| {
             // Initialiser l'état avec le moteur Whisper
@@ -302,16 +333,39 @@ pub fn run() {
             // Initialiser le thread audio pour le push-to-talk
             init_ptt_audio_thread();
 
-            // Charger les settings pour le raccourci
+            // Initialiser le thread audio pour la transcription GUI
+            commands::transcription::init_gui_audio_thread();
+
+            // Charger les settings pour les raccourcis
             let settings = storage::config::load_settings();
+
+            // Raccourci push-to-talk
             let ptt_hotkey = settings.hotkey_push_to_talk.clone();
             let ptt_shortcut = parse_hotkey(&ptt_hotkey)
-                .unwrap_or_else(|| Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR));
+                .unwrap_or_else(|| Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space));
 
-            // Enregistrer le raccourci push-to-talk
+            // Stocker et enregistrer le raccourci PTT
+            if let Ok(mut guard) = PTT_SHORTCUT.lock() {
+                *guard = Some(ptt_shortcut);
+            }
             match app.global_shortcut().register(ptt_shortcut) {
                 Ok(_) => println!("[PTT] Shortcut '{}' registered successfully!", ptt_hotkey),
                 Err(e) => println!("[PTT] ERROR registering shortcut: {:?}", e),
+            }
+
+            // Raccourci traduction (si activé)
+            if settings.translation_enabled {
+                let translate_hotkey = settings.hotkey_translate.clone();
+                if let Some(translate_shortcut) = parse_hotkey(&translate_hotkey) {
+                    // Stocker le raccourci
+                    if let Ok(mut guard) = TRANSLATE_SHORTCUT.lock() {
+                        *guard = Some(translate_shortcut);
+                    }
+                    match app.global_shortcut().register(translate_shortcut) {
+                        Ok(_) => println!("[TRANSLATE] Shortcut '{}' registered successfully!", translate_hotkey),
+                        Err(e) => println!("[TRANSLATE] ERROR registering shortcut: {:?}", e),
+                    }
+                }
             }
 
             // Stocker l'icône par défaut (créer une copie owned)
@@ -489,32 +543,11 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &str) {
 }
 
 /// Colle la dernière transcription
-fn paste_last_transcript(app: &tauri::AppHandle) {
+fn paste_last_transcript(_app: &tauri::AppHandle) {
     let history = storage::history::load_history();
     if let Some(last) = history.transcriptions.last() {
         let text = &last.text;
-
-        // Copier dans le clipboard via pbcopy
-        #[cfg(target_os = "macos")]
-        {
-            use std::process::{Command, Stdio};
-            use std::io::Write;
-
-            if let Ok(mut child) = Command::new("pbcopy")
-                .stdin(Stdio::piped())
-                .spawn()
-            {
-                if let Some(mut stdin) = child.stdin.take() {
-                    let _ = stdin.write_all(text.as_bytes());
-                }
-                let _ = child.wait();
-
-                // Simuler Cmd+V avec AppleScript
-                let _ = Command::new("osascript")
-                    .args(["-e", "tell application \"System Events\" to keystroke \"v\" using command down"])
-                    .output();
-            }
-        }
+        paste_text(text);
     }
 }
 
@@ -813,8 +846,327 @@ fn paste_text(text: &str) {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+            KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
+        };
+
+        // Copier dans le clipboard via clip.exe
+        println!("[PASTE] Copying to clipboard via clip.exe...");
+        use std::io::Write;
+        match Command::new("cmd")
+            .args(["/C", "clip"])
+            .stdin(Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    // Windows clipboard expects UTF-16 or the current code page
+                    // Using UTF-8 with clip.exe should work for most cases
+                    match stdin.write_all(text.as_bytes()) {
+                        Ok(_) => println!("[PASTE] Written to clip.exe stdin"),
+                        Err(e) => {
+                            println!("[PASTE] Failed to write to clip.exe stdin: {}", e);
+                            return;
+                        }
+                    }
+                }
+                match child.wait() {
+                    Ok(status) => println!("[PASTE] clip.exe exited with: {}", status),
+                    Err(e) => println!("[PASTE] Failed to wait for clip.exe: {}", e),
+                }
+            }
+            Err(e) => {
+                println!("[PASTE] Failed to spawn clip.exe: {}", e);
+                return;
+            }
+        }
+
+        // Délai pour s'assurer que le clipboard est mis à jour
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Simuler Ctrl+V avec SendInput
+        println!("[PASTE] Simulating Ctrl+V via SendInput...");
+
+        let inputs: [INPUT; 4] = [
+            // Ctrl down
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // V down
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_V,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // V up
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_V,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // Ctrl up
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+        ];
+
+        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+
+        if sent == 4 {
+            println!("[PASTE] ✓ Text pasted successfully!");
+        } else {
+            println!("[PASTE] SendInput failed: only {} of 4 inputs sent", sent);
+            println!("[PASTE] ⚠️  Le texte est copié dans le presse-papier. Utilisez Ctrl+V manuellement.");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+
+        // Detect display server
+        let wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+        println!("[PASTE] Linux detected, display server: {}", if wayland { "Wayland" } else { "X11" });
+
+        if wayland {
+            // Wayland - use wl-copy for clipboard
+            println!("[PASTE] Copying to clipboard via wl-copy...");
+            match Command::new("wl-copy")
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        match stdin.write_all(text.as_bytes()) {
+                            Ok(_) => println!("[PASTE] Written to wl-copy stdin"),
+                            Err(e) => {
+                                println!("[PASTE] Failed to write to wl-copy stdin: {}", e);
+                                return;
+                            }
+                        }
+                    }
+                    let _ = child.wait();
+                }
+                Err(e) => {
+                    println!("[PASTE] Failed to spawn wl-copy: {}. Install with 'sudo apt install wl-clipboard'", e);
+                    return;
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Try wtype first
+            println!("[PASTE] Simulating Ctrl+V via wtype...");
+            match Command::new("wtype")
+                .args(["-M", "ctrl", "v", "-m", "ctrl"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    println!("[PASTE] ✓ Text pasted successfully via wtype!");
+                }
+                _ => {
+                    // Fallback to ydotool
+                    println!("[PASTE] wtype failed, trying ydotool...");
+                    match Command::new("ydotool")
+                        .args(["key", "29:1", "47:1", "47:0", "29:0"])
+                        .output()
+                    {
+                        Ok(output) if output.status.success() => {
+                            println!("[PASTE] ✓ Text pasted successfully via ydotool!");
+                        }
+                        _ => {
+                            println!("[PASTE] ⚠️  Le texte est copié dans le presse-papier. Utilisez Ctrl+V manuellement.");
+                            println!("[PASTE] ⚠️  Pour activer le paste automatique sur Wayland:");
+                            println!("[PASTE]    sudo apt install wtype  # ou ydotool");
+                        }
+                    }
+                }
+            }
+        } else {
+            // X11 - use xclip for clipboard
+            println!("[PASTE] Copying to clipboard via xclip...");
+            match Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        match stdin.write_all(text.as_bytes()) {
+                            Ok(_) => println!("[PASTE] Written to xclip stdin"),
+                            Err(e) => {
+                                println!("[PASTE] Failed to write to xclip stdin: {}", e);
+                                return;
+                            }
+                        }
+                    }
+                    let _ = child.wait();
+                }
+                Err(e) => {
+                    println!("[PASTE] Failed to spawn xclip: {}. Install with 'sudo apt install xclip'", e);
+                    return;
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Use xdotool for paste
+            println!("[PASTE] Simulating Ctrl+V via xdotool...");
+            match Command::new("xdotool")
+                .args(["key", "--clearmodifiers", "ctrl+v"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    println!("[PASTE] ✓ Text pasted successfully via xdotool!");
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("[PASTE] xdotool failed: {}", stderr);
+                    println!("[PASTE] ⚠️  Le texte est copié dans le presse-papier. Utilisez Ctrl+V manuellement.");
+                }
+                Err(e) => {
+                    println!("[PASTE] Failed to execute xdotool: {}. Install with 'sudo apt install xdotool'", e);
+                    println!("[PASTE] ⚠️  Le texte est copié dans le presse-papier. Utilisez Ctrl+V manuellement.");
+                }
+            }
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         println!("[PASTE] Paste not implemented for this platform - text copied to clipboard");
+    }
+}
+
+/// Lit le texte du presse-papiers, le traduit et le colle
+fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
+    println!("[TRANSLATE] translate_clipboard_and_paste() called");
+
+    // 1. Lire le texte du presse-papiers
+    let clipboard_text = match app.clipboard().read_text() {
+        Ok(text) => {
+            if text.is_empty() {
+                println!("[TRANSLATE] Clipboard is empty");
+                return;
+            }
+            text
+        }
+        Err(e) => {
+            println!("[TRANSLATE] Failed to read clipboard: {}", e);
+            return;
+        }
+    };
+
+    println!("[TRANSLATE] Clipboard text: '{}' ({} chars)",
+             &clipboard_text[..clipboard_text.len().min(50)], clipboard_text.len());
+
+    // 2. Récupérer la langue cible depuis les settings
+    let settings = storage::config::load_settings();
+    let target_language = settings.translation_target_language;
+
+    // 3. Récupérer la clé API
+    let api_key = match commands::llm::get_groq_api_key_internal() {
+        Some(key) => key,
+        None => {
+            println!("[TRANSLATE] No Groq API key configured");
+            // Notifier l'utilisateur via une notification
+            let _ = app.emit("translation_error", "Clé API Groq non configurée");
+            return;
+        }
+    };
+
+    // 4. Créer le prompt de traduction
+    let language_name = match target_language.as_str() {
+        "fr" => "French",
+        "en" => "English",
+        "de" => "German",
+        "es" => "Spanish",
+        "it" => "Italian",
+        "pt" => "Portuguese",
+        "nl" => "Dutch",
+        "ru" => "Russian",
+        "zh" => "Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "ar" => "Arabic",
+        _ => &target_language,
+    };
+
+    let system_prompt = format!(
+        "You are a professional translator. Translate the following text to {}. \
+         Only output the translation, nothing else. Preserve the original formatting, \
+         punctuation and tone. If the text is already in {}, return it unchanged.",
+        language_name, language_name
+    );
+
+    // 5. Appeler l'API Groq de manière synchrone
+    println!("[TRANSLATE] Calling Groq API for translation to {}...", language_name);
+
+    // Utiliser tokio runtime pour l'appel async
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            println!("[TRANSLATE] Failed to create tokio runtime: {}", e);
+            return;
+        }
+    };
+
+    let translated = rt.block_on(async {
+        llm::groq_client::send_completion(&api_key, &system_prompt, &clipboard_text).await
+    });
+
+    match translated {
+        Ok(text) => {
+            let trimmed = text.trim().to_string();
+            println!("[TRANSLATE] Translation successful: '{}'", &trimmed[..trimmed.len().min(50)]);
+
+            // 6. Coller le texte traduit
+            paste_text(&trimmed);
+
+            // Émettre un événement de succès
+            let _ = app.emit("translation_complete", &trimmed);
+        }
+        Err(e) => {
+            println!("[TRANSLATE] Translation failed: {}", e);
+            let _ = app.emit("translation_error", format!("Erreur de traduction: {}", e));
+        }
     }
 }
