@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { DictationPanel } from './components/DictationPanel';
 import { TranscriptionHistory } from './components/TranscriptionHistory';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -20,6 +21,13 @@ function App() {
     loadSettings();
     initialize(); // Réinitialiser l'état d'enregistrement au démarrage
   }, [loadSettings, initialize]);
+
+  // Afficher la fenêtre flottante au démarrage si activée
+  useEffect(() => {
+    if (settings?.floating_window_enabled) {
+      invoke('show_floating_window').catch(console.error);
+    }
+  }, [settings?.floating_window_enabled]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden relative">

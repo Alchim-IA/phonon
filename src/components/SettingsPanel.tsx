@@ -659,7 +659,20 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 <input
                   type="checkbox"
                   checked={settings.floating_window_enabled}
-                  onChange={(e) => updateSettings({ floating_window_enabled: e.target.checked })}
+                  onChange={async (e) => {
+                    const enabled = e.target.checked;
+                    await updateSettings({ floating_window_enabled: enabled });
+                    // Afficher ou cacher la fenêtre flottante
+                    try {
+                      if (enabled) {
+                        await invoke('show_floating_window');
+                      } else {
+                        await invoke('hide_floating_window');
+                      }
+                    } catch (err) {
+                      console.error('Failed to toggle floating window:', err);
+                    }
+                  }}
                 />
                 <span className="checkmark" />
                 <div>

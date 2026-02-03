@@ -434,6 +434,17 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Intercepter la fermeture de la fenêtre principale pour la cacher au lieu de la fermer
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    // Empêcher la fermeture et cacher la fenêtre à la place
+                    api.prevent_close();
+                    let _ = window.hide();
+                    println!("[WINDOW] Main window hidden instead of closed");
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
