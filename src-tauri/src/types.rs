@@ -104,6 +104,10 @@ pub struct AppSettings {
     pub llm_mode: LlmMode,
     pub voice_commands_enabled: bool,
     pub dictation_mode: DictationMode,
+    pub streaming_enabled: bool,
+    pub auto_paste_enabled: bool,
+    pub floating_window_enabled: bool,
+    pub floating_window_position: Option<(i32, i32)>,
 }
 
 impl Default for AppSettings {
@@ -123,6 +127,10 @@ impl Default for AppSettings {
             llm_mode: LlmMode::default(),
             voice_commands_enabled: true,
             dictation_mode: DictationMode::default(),
+            streaming_enabled: true,
+            auto_paste_enabled: true,
+            floating_window_enabled: false,
+            floating_window_position: None,
         }
     }
 }

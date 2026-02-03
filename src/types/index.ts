@@ -41,6 +41,9 @@ export interface AppSettings {
   llm_mode: LlmMode;
   voice_commands_enabled: boolean;
   dictation_mode: DictationMode;
+  streaming_enabled: boolean;
+  auto_paste_enabled: boolean;
+  floating_window_enabled: boolean;
 }
 
 export interface AudioDevice {
@@ -50,3 +53,9 @@ export interface AudioDevice {
 }
 
 export type TranscriptionStatus = 'idle' | 'recording' | 'processing' | 'completed' | 'error';
+
+export interface StreamingChunk {
+  text: string;
+  is_final: boolean;
+  duration_seconds: number;
+}
