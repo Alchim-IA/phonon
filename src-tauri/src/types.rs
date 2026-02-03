@@ -21,6 +21,7 @@ pub struct AppSettings {
     pub minimize_to_tray: bool,
     pub auto_copy_to_clipboard: bool,
     pub notification_on_complete: bool,
+    pub whisper_model: ModelSize,
 }
 
 impl Default for AppSettings {
@@ -35,6 +36,7 @@ impl Default for AppSettings {
             minimize_to_tray: true,
             auto_copy_to_clipboard: true,
             notification_on_complete: true,
+            whisper_model: ModelSize::Tiny,
         }
     }
 }
@@ -54,4 +56,52 @@ pub struct DictionaryData {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HistoryData {
     pub transcriptions: Vec<TranscriptionResult>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelSize {
+    Tiny,
+    Small,
+    Medium,
+}
+
+impl ModelSize {
+    pub fn file_name(&self) -> &'static str {
+        match self {
+            ModelSize::Tiny => "ggml-tiny.bin",
+            ModelSize::Small => "ggml-small.bin",
+            ModelSize::Medium => "ggml-medium.bin",
+        }
+    }
+
+    pub fn download_url(&self) -> &'static str {
+        match self {
+            ModelSize::Tiny => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+            ModelSize::Small => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+            ModelSize::Medium => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+        }
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        match self {
+            ModelSize::Tiny => 75_000_000,
+            ModelSize::Small => 466_000_000,
+            ModelSize::Medium => 1_500_000_000,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ModelSize::Tiny => "Tiny (75 MB)",
+            ModelSize::Small => "Small (466 MB)",
+            ModelSize::Medium => "Medium (1.5 GB)",
+        }
+    }
+}
+
+impl Default for ModelSize {
+    fn default() -> Self {
+        ModelSize::Tiny
+    }
 }

@@ -2,25 +2,25 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum EngineError {
-    OpenVINOInitFailed(String),
+    WhisperInitFailed(String),
     ModelLoadFailed(String),
+    ModelNotFound(String),
     InferenceError(String),
     AudioTooShort,
     InvalidSampleRate(u32),
-    VocabularyError(String),
-    TensorError(String),
+    DownloadError(String),
 }
 
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EngineError::OpenVINOInitFailed(msg) => write!(f, "OpenVINO initialization failed: {}", msg),
+            EngineError::WhisperInitFailed(msg) => write!(f, "Whisper initialization failed: {}", msg),
             EngineError::ModelLoadFailed(msg) => write!(f, "Model loading failed: {}", msg),
+            EngineError::ModelNotFound(path) => write!(f, "Model not found: {}", path),
             EngineError::InferenceError(msg) => write!(f, "Inference error: {}", msg),
             EngineError::AudioTooShort => write!(f, "Audio too short (minimum 0.5 seconds)"),
             EngineError::InvalidSampleRate(rate) => write!(f, "Invalid sample rate: {}Hz (expected 16000Hz)", rate),
-            EngineError::VocabularyError(msg) => write!(f, "Vocabulary error: {}", msg),
-            EngineError::TensorError(msg) => write!(f, "Tensor error: {}", msg),
+            EngineError::DownloadError(msg) => write!(f, "Download error: {}", msg),
         }
     }
 }
