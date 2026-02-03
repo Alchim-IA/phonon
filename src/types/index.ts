@@ -9,6 +9,10 @@ export interface TranscriptionResult {
 
 export type ModelSize = 'tiny' | 'small' | 'medium';
 
+export type LlmMode = 'off' | 'basic' | 'smart' | 'contextual';
+
+export type DictationMode = 'general' | 'email' | 'code' | 'notes';
+
 export interface ModelInfo {
   size: ModelSize;
   display_name: string;
@@ -33,6 +37,10 @@ export interface AppSettings {
   auto_copy_to_clipboard: boolean;
   notification_on_complete: boolean;
   whisper_model: ModelSize;
+  llm_enabled: boolean;
+  llm_mode: LlmMode;
+  voice_commands_enabled: boolean;
+  dictation_mode: DictationMode;
 }
 
 export interface AudioDevice {
