@@ -24,6 +24,14 @@ impl ParakeetModelSize {
     }
 }
 
+impl From<crate::types::ParakeetModelSize> for ParakeetModelSize {
+    fn from(value: crate::types::ParakeetModelSize) -> Self {
+        match value {
+            crate::types::ParakeetModelSize::Tdt06bV3 => ParakeetModelSize::Tdt06bV3,
+        }
+    }
+}
+
 pub struct ParakeetEngine {
     model_path: std::path::PathBuf,
     language: Option<String>,
