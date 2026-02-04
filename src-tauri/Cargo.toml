@@ -41,6 +41,25 @@ futures-util = "0.3"
 open = "5"
 keyring = "3"
 
+# Vosk speech recognition
+vosk = "0.2"
+
+# Sherpa-ONNX for Parakeet (optional - requires native build tools)
+sherpa-rs = { version = "0.1", optional = true }
+
+# Audio decoding multi-format
+symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "ogg", "vorbis"] }
+
+# Audio resampling
+rubato = "0.15"
+
+# Zip extraction for model downloads
+zip = "0.6"
+
+[features]
+default = []
+parakeet = ["sherpa-rs"]
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
