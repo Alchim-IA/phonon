@@ -57,9 +57,8 @@ rubato = "0.15"
 # Zip extraction for model downloads
 zip = "0.6"
 
-# LLM local inference via llama.cpp
-llama-cpp-2 = "0.1"
-
+# LLM local inference via llama.cpp - désactivé temporairement pour ARM64
+# llama-cpp-2 = "0.1"
 
 [features]
 default = []
