@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Manager};
 
-use crate::engines::{ModelManager, ParakeetEngine, SpeechEngine, VoskEngine, WhisperEngine};
+use crate::engines::{ModelManager, ParakeetCoreMLEngine, ParakeetEngine, SpeechEngine, VoskEngine, WhisperEngine};
 use crate::storage::config;
 use crate::types::{AppSettings, EngineType, ModelSize, ParakeetModelSize, VoskLanguage};
 
@@ -65,46 +65,74 @@ impl AppState {
             Some(resource_path.join("models")),
         );
 
+        // Helper to load Whisper engine
+        let load_whisper = |model_manager: &ModelManager, settings: &AppSettings| -> Option<Box<dyn SpeechEngine>> {
+            if let Some(model_path) = model_manager.get_model_path(settings.whisper_model) {
+                let lang = if settings.auto_detect_language {
+                    None
+                } else {
+                    Some(settings.transcription_language.clone())
+                };
+
+                match WhisperEngine::new(&model_path, lang, settings.whisper_model) {
+                    Ok(engine) => {
+                        log::info!("Whisper engine initialized with model {:?}", settings.whisper_model);
+                        Some(Box::new(engine))
+                    }
+                    Err(e) => {
+                        log::error!("Failed to initialize Whisper engine: {}", e);
+                        None
+                    }
+                }
+            } else {
+                log::warn!("Whisper model {:?} not available", settings.whisper_model);
+                None
+            }
+        };
+
         // Load engine based on configured type
         let engine: Option<Box<dyn SpeechEngine>> = match settings.engine_type {
-            EngineType::Whisper => {
-                if let Some(model_path) = model_manager.get_model_path(settings.whisper_model) {
-                    let lang = if settings.auto_detect_language {
-                        None
-                    } else {
-                        Some(settings.transcription_language.clone())
-                    };
-
-                    match WhisperEngine::new(&model_path, lang, settings.whisper_model) {
-                        Ok(engine) => {
-                            log::info!("Whisper engine initialized with model {:?}", settings.whisper_model);
-                            Some(Box::new(engine))
-                        }
-                        Err(e) => {
-                            log::error!("Failed to initialize Whisper engine: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    log::warn!("Whisper model {:?} not available, engine not initialized", settings.whisper_model);
-                    None
-                }
-            }
+            EngineType::Whisper => load_whisper(&model_manager, &settings),
             EngineType::Parakeet => {
-                if let Some(model_path) = model_manager.get_parakeet_model_path(settings.parakeet_model) {
-                    match ParakeetEngine::new(&model_path, settings.parakeet_model.into()) {
-                        Ok(engine) => {
-                            log::info!("Parakeet engine initialized with model {:?}", settings.parakeet_model);
-                            Some(Box::new(engine))
+                // On macOS, use CoreML-based Parakeet engine
+                #[cfg(target_os = "macos")]
+                {
+                    // Find sidecar path
+                    let sidecar_path = Self::find_parakeet_sidecar(&resource_path);
+                    if let Some(path) = sidecar_path {
+                        match ParakeetCoreMLEngine::new(path) {
+                            Ok(engine) => {
+                                log::info!("Parakeet CoreML engine initialized");
+                                Some(Box::new(engine))
+                            }
+                            Err(e) => {
+                                log::error!("Failed to initialize Parakeet CoreML engine: {}, falling back to Whisper", e);
+                                load_whisper(&model_manager, &settings)
+                            }
                         }
-                        Err(e) => {
-                            log::error!("Failed to initialize Parakeet engine: {}", e);
-                            None
-                        }
+                    } else {
+                        log::warn!("Parakeet CoreML sidecar not found, falling back to Whisper");
+                        load_whisper(&model_manager, &settings)
                     }
-                } else {
-                    log::warn!("Parakeet model {:?} not available, engine not initialized", settings.parakeet_model);
-                    None
+                }
+                // On other platforms, use ONNX-based Parakeet engine
+                #[cfg(not(target_os = "macos"))]
+                {
+                    if let Some(model_path) = model_manager.get_parakeet_model_path(settings.parakeet_model) {
+                        match ParakeetEngine::new(&model_path, settings.parakeet_model.into()) {
+                            Ok(engine) => {
+                                log::info!("Parakeet engine initialized with model {:?}", settings.parakeet_model);
+                                Some(Box::new(engine))
+                            }
+                            Err(e) => {
+                                log::error!("Failed to initialize Parakeet engine: {}, falling back to Whisper", e);
+                                load_whisper(&model_manager, &settings)
+                            }
+                        }
+                    } else {
+                        log::warn!("Parakeet model {:?} not available, falling back to Whisper", settings.parakeet_model);
+                        load_whisper(&model_manager, &settings)
+                    }
                 }
             }
             EngineType::Vosk => {
@@ -146,6 +174,54 @@ impl AppState {
         })
     }
 
+    /// Find the Parakeet CoreML sidecar binary
+    #[cfg(target_os = "macos")]
+    fn find_parakeet_sidecar(resource_path: &PathBuf) -> Option<PathBuf> {
+        // Determine target triple
+        #[cfg(target_arch = "x86_64")]
+        let target = "x86_64-apple-darwin";
+        #[cfg(target_arch = "aarch64")]
+        let target = "aarch64-apple-darwin";
+
+        // Check in binaries directory (development)
+        let dev_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .map(|p| p.join("binaries").join(format!("parakeet-coreml-{}", target)));
+
+        if let Some(ref path) = dev_path {
+            if path.exists() {
+                log::info!("Found Parakeet sidecar at dev path: {:?}", path);
+                return Some(path.clone());
+            }
+        }
+
+        // Check in resource directory (production)
+        let prod_path = resource_path.join("binaries").join(format!("parakeet-coreml-{}", target));
+        if prod_path.exists() {
+            log::info!("Found Parakeet sidecar at resource path: {:?}", prod_path);
+            return Some(prod_path);
+        }
+
+        // Check alongside the executable
+        let exe_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .map(|p| p.join(format!("parakeet-coreml-{}", target)));
+
+        if let Some(ref path) = exe_path {
+            if path.exists() {
+                log::info!("Found Parakeet sidecar alongside exe: {:?}", path);
+                return Some(path.clone());
+            }
+        }
+
+        log::warn!("Parakeet sidecar not found for target {}", target);
+        None
+    }
+
     /// Recharge le moteur Whisper avec un nouveau modèle
     pub fn reload_engine(&self, model_size: ModelSize, language: Option<String>) -> Result<(), String> {
         let model_path = self.model_manager
@@ -162,18 +238,36 @@ impl AppState {
     }
 
     /// Recharge le moteur Parakeet avec un nouveau modèle
-    pub fn reload_parakeet_engine(&self, model_size: ParakeetModelSize) -> Result<(), String> {
-        let model_path = self.model_manager
-            .get_parakeet_model_path(model_size)
-            .ok_or_else(|| format!("Parakeet model {:?} not available", model_size))?;
+    pub fn reload_parakeet_engine(&self, _model_size: ParakeetModelSize) -> Result<(), String> {
+        // On macOS, use CoreML-based Parakeet engine
+        #[cfg(target_os = "macos")]
+        {
+            let sidecar_path = Self::find_parakeet_sidecar(&self.resource_path)
+                .ok_or_else(|| "Parakeet CoreML sidecar not found".to_string())?;
 
-        let new_engine = ParakeetEngine::new(&model_path, model_size.into())?;
+            let new_engine = ParakeetCoreMLEngine::new(sidecar_path)?;
 
-        let mut engine = self.engine.write().map_err(|e| e.to_string())?;
-        *engine = Some(Box::new(new_engine));
+            let mut engine = self.engine.write().map_err(|e| e.to_string())?;
+            *engine = Some(Box::new(new_engine));
 
-        log::info!("Parakeet engine reloaded with model {:?}", model_size);
-        Ok(())
+            log::info!("Parakeet CoreML engine reloaded");
+            Ok(())
+        }
+        // On other platforms, use ONNX-based Parakeet engine
+        #[cfg(not(target_os = "macos"))]
+        {
+            let model_path = self.model_manager
+                .get_parakeet_model_path(_model_size)
+                .ok_or_else(|| format!("Parakeet model {:?} not available", _model_size))?;
+
+            let new_engine = ParakeetEngine::new(&model_path, _model_size.into())?;
+
+            let mut engine = self.engine.write().map_err(|e| e.to_string())?;
+            *engine = Some(Box::new(new_engine));
+
+            log::info!("Parakeet engine reloaded with model {:?}", _model_size);
+            Ok(())
+        }
     }
 
     /// Recharge le moteur Vosk avec une nouvelle langue

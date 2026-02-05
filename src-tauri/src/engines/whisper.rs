@@ -118,11 +118,16 @@ impl SpeechEngine for WhisperEngine {
             processing_time_ms,
             detected_language,
             timestamp: Utc::now().timestamp(),
+            model_used: Some(self.model_display_name()),
         })
     }
 
     fn name(&self) -> &str {
         "Whisper"
+    }
+
+    fn model_display_name(&self) -> String {
+        format!("Whisper {}", self.model_size.display_name())
     }
 }
 

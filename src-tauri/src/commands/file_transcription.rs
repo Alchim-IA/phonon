@@ -1,6 +1,7 @@
 use crate::audio::AudioDecoder;
 use crate::state::AppState;
-use crate::types::{EngineType, TranscriptionResult};
+use crate::storage::history;
+use crate::types::TranscriptionResult;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -20,32 +21,15 @@ pub struct FileTranscriptionProgress {
     pub status: String,
 }
 
-/// Transcribe multiple audio files
+/// Transcribe multiple audio files using the currently configured engine
 #[tauri::command]
 pub async fn transcribe_files(
     app: AppHandle,
     state: State<'_, AppState>,
     paths: Vec<String>,
-    engine_type: Option<EngineType>,
-    language: Option<String>,
 ) -> Result<Vec<FileTranscriptionResult>, String> {
     let mut results = Vec::new();
     let total = paths.len();
-
-    // If a specific engine type is requested, switch to it temporarily
-    if let Some(engine_type) = engine_type {
-        if let Err(e) = state.switch_engine_type(engine_type) {
-            log::warn!("Failed to switch engine: {}, using current engine", e);
-        }
-    }
-
-    // Update language if specified
-    if let Some(ref lang) = language {
-        if let Ok(mut settings) = state.settings.write() {
-            settings.transcription_language = lang.clone();
-            settings.auto_detect_language = false;
-        }
-    }
 
     for (index, path_str) in paths.into_iter().enumerate() {
         let path = std::path::Path::new(&path_str);
@@ -114,6 +98,11 @@ pub async fn transcribe_files(
 
         match transcription {
             Ok(result) => {
+                // Save to history
+                if let Err(e) = history::add_transcription(result.clone()) {
+                    log::warn!("Failed to save transcription to history: {}", e);
+                }
+
                 results.push(FileTranscriptionResult {
                     file_path: path_str.clone(),
                     file_name,

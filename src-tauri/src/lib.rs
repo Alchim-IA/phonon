@@ -245,6 +245,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
@@ -324,6 +325,15 @@ pub fn run() {
             commands::delete_model,
             commands::switch_model,
             commands::is_engine_ready,
+            commands::get_vosk_models,
+            commands::download_vosk_model,
+            commands::select_vosk_language,
+            commands::switch_engine_type,
+            commands::is_parakeet_available,
+            commands::get_parakeet_models,
+            commands::download_parakeet_model,
+            commands::delete_parakeet_model,
+            commands::select_parakeet_model,
             commands::set_groq_api_key,
             commands::get_groq_api_key,
             commands::has_groq_api_key,
@@ -392,14 +402,55 @@ pub fn run() {
 
             // Stocker l'icône par défaut (créer une copie owned)
             println!("[TRAY] Initializing tray icons...");
-            let default_icon = app.default_window_icon().unwrap();
-            println!("[TRAY] Default icon size: {}x{}", default_icon.width(), default_icon.height());
 
-            let default_icon_owned = Image::new_owned(
-                default_icon.rgba().to_vec(),
-                default_icon.width(),
-                default_icon.height(),
-            );
+            // Charger l'icône tray (blanche pour le mode sombre sur macOS)
+            // On utilise une icône "Template" qui est blanche et sera adaptée par le système
+            let tray_icon_path = app.path().resource_dir()
+                .ok()
+                .and_then(|p| {
+                    // Essayer l'icône template @2x d'abord pour Retina
+                    let path_2x = p.join("icons/tray-iconTemplate@2x.png");
+                    if path_2x.exists() { return Some(path_2x); }
+                    let path = p.join("icons/tray-iconTemplate.png");
+                    if path.exists() { Some(path) } else { None }
+                })
+                .or_else(|| {
+                    // Fallback: chemin relatif depuis src-tauri
+                    let path_2x = std::path::PathBuf::from("icons/tray-iconTemplate@2x.png");
+                    if path_2x.exists() { return Some(path_2x); }
+                    let path = std::path::PathBuf::from("icons/tray-iconTemplate.png");
+                    if path.exists() { Some(path) } else { None }
+                })
+                .or_else(|| {
+                    // Fallback ultime: icône standard
+                    let path = std::path::PathBuf::from("icons/icon.png");
+                    if path.exists() { Some(path) } else { None }
+                });
+
+            let (icon_rgba, icon_width, icon_height) = if let Some(path) = tray_icon_path {
+                println!("[TRAY] Loading tray icon from: {:?}", path);
+                match image::open(&path) {
+                    Ok(img) => {
+                        let rgba = img.to_rgba8();
+                        let (w, h) = rgba.dimensions();
+                        (rgba.into_raw(), w, h)
+                    }
+                    Err(e) => {
+                        println!("[TRAY] Failed to load tray icon from file: {}", e);
+                        // Fallback to default window icon
+                        let default_icon = app.default_window_icon().unwrap();
+                        (default_icon.rgba().to_vec(), default_icon.width(), default_icon.height())
+                    }
+                }
+            } else {
+                println!("[TRAY] Using default window icon for tray");
+                let default_icon = app.default_window_icon().unwrap();
+                (default_icon.rgba().to_vec(), default_icon.width(), default_icon.height())
+            };
+
+            println!("[TRAY] Icon size: {}x{}", icon_width, icon_height);
+
+            let default_icon_owned = Image::new_owned(icon_rgba.clone(), icon_width, icon_height);
             if let Ok(mut guard) = ICON_DEFAULT.lock() {
                 *guard = Some(default_icon_owned);
                 println!("[TRAY] ICON_DEFAULT stored");
@@ -413,11 +464,7 @@ pub fn run() {
             }
 
             // Cloner l'icône pour le tray
-            let tray_icon = Image::new_owned(
-                default_icon.rgba().to_vec(),
-                default_icon.width(),
-                default_icon.height(),
-            );
+            let tray_icon = Image::new_owned(icon_rgba, icon_width, icon_height);
 
             // Créer le menu tray
             let tray_menu = create_tray_menu(app)?;
@@ -1377,9 +1424,144 @@ fn paste_text(text: &str) {
     }
 }
 
+/// Simule Cmd+C (macOS) ou Ctrl+C (Windows/Linux) pour copier le texte sélectionné
+fn copy_selected_text() {
+    println!("[COPY] Copying selected text to clipboard...");
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = r#"tell application "System Events" to keystroke "c" using command down"#;
+        match Command::new("osascript")
+            .args(["-e", script])
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    println!("[COPY] ✓ Cmd+C simulated successfully");
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("[COPY] AppleScript Cmd+C failed: {}", stderr);
+                }
+            }
+            Err(e) => {
+                println!("[COPY] Failed to execute osascript for copy: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+            KEYEVENTF_KEYUP, VK_CONTROL, VK_C,
+        };
+
+        let inputs: [INPUT; 4] = [
+            // Ctrl down
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // C down
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_C,
+                        wScan: 0,
+                        dwFlags: KEYBD_EVENT_FLAGS(0),
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // C up
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_C,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // Ctrl up
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_CONTROL,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+        ];
+
+        unsafe {
+            let result = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+            if result == 4 {
+                println!("[COPY] ✓ Ctrl+C simulated via SendInput");
+            } else {
+                println!("[COPY] SendInput returned {}, expected 4", result);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try xdotool for X11, wtype for Wayland
+        let wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+        if wayland {
+            match Command::new("wtype")
+                .args(["-M", "ctrl", "c", "-m", "ctrl"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    println!("[COPY] ✓ Ctrl+C simulated via wtype");
+                }
+                _ => {
+                    println!("[COPY] wtype failed for Ctrl+C");
+                }
+            }
+        } else {
+            match Command::new("xdotool")
+                .args(["key", "--clearmodifiers", "ctrl+c"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    println!("[COPY] ✓ Ctrl+C simulated via xdotool");
+                }
+                _ => {
+                    println!("[COPY] xdotool failed for Ctrl+C");
+                }
+            }
+        }
+    }
+
+    // Attendre que le presse-papiers soit mis à jour
+    std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
 /// Lit le texte du presse-papiers, le traduit et le colle
 fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
     println!("[TRANSLATE] translate_clipboard_and_paste() called");
+
+    // 0. D'abord, copier le texte sélectionné dans le presse-papiers
+    copy_selected_text();
 
     // 1. Lire le texte du presse-papiers
     let clipboard_text = match app.clipboard().read_text() {

@@ -314,6 +314,7 @@ pub async fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> Resul
         processing_time_ms: result.processing_time_ms,
         detected_language: result.detected_language,
         timestamp: result.timestamp,
+        model_used: result.model_used,
     };
 
     // Émettre le chunk final

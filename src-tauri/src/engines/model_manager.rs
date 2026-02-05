@@ -244,4 +244,103 @@ impl ModelManager {
             .filter(|&size| self.is_parakeet_available(size))
             .collect()
     }
+
+    /// Download a Parakeet model from HuggingFace (istupakov/parakeet-tdt-0.6b-v3-onnx)
+    pub async fn download_parakeet_model<F>(
+        &self,
+        model_size: ParakeetModelSize,
+        progress_callback: F,
+    ) -> Result<PathBuf, String>
+    where
+        F: Fn(u64, u64) + Send + 'static,
+    {
+        let parakeet_dir = self.models_dir.join("parakeet");
+        let model_dir = parakeet_dir.join(model_size.model_name());
+
+        fs::create_dir_all(&model_dir)
+            .await
+            .map_err(|e| format!("Failed to create parakeet directory: {}", e))?;
+
+        // Files to download from HuggingFace (non-quantized for tract-onnx compatibility)
+        let base_url = "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main";
+        let files = [
+            ("encoder-model.onnx", 41_800_000u64),
+            ("encoder-model.onnx.data", 2_440_000_000u64),
+            ("decoder_joint-model.onnx", 72_500_000u64),
+            ("vocab.txt", 94_000u64),
+        ];
+
+        let total_size: u64 = files.iter().map(|(_, s)| s).sum();
+        let mut total_downloaded: u64 = 0;
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+        for (filename, estimated_size) in files {
+            let url = format!("{}/{}", base_url, filename);
+            let dest_path = model_dir.join(filename);
+
+            // Skip if file already exists with reasonable size
+            if dest_path.exists() {
+                if let Ok(meta) = std::fs::metadata(&dest_path) {
+                    if meta.len() > estimated_size / 2 {
+                        log::info!("File {} already exists, skipping", filename);
+                        total_downloaded += estimated_size;
+                        progress_callback(total_downloaded, total_size);
+                        continue;
+                    }
+                }
+            }
+
+            log::info!("Downloading {} from {}", filename, url);
+
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to download {}: {}", filename, e))?;
+
+            if !response.status().is_success() {
+                return Err(format!("Download of {} failed with status: {}", filename, response.status()));
+            }
+
+            let file_size = response.content_length().unwrap_or(estimated_size);
+            let mut file_downloaded: u64 = 0;
+
+            let mut file = fs::File::create(&dest_path)
+                .await
+                .map_err(|e| format!("Failed to create file {}: {}", filename, e))?;
+
+            let mut stream = response.bytes_stream();
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| format!("Download error for {}: {}", filename, e))?;
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| format!("Write error for {}: {}", filename, e))?;
+                file_downloaded += chunk.len() as u64;
+                progress_callback(total_downloaded + file_downloaded, total_size);
+            }
+
+            file.flush().await.map_err(|e| format!("Flush error: {}", e))?;
+            total_downloaded += file_size;
+            log::info!("Downloaded {} successfully", filename);
+        }
+
+        log::info!("Parakeet model {} downloaded successfully", model_size.model_name());
+        Ok(model_dir)
+    }
+
+    /// Delete a Parakeet model
+    pub async fn delete_parakeet_model(&self, model_size: ParakeetModelSize) -> Result<(), String> {
+        let model_dir = self.models_dir.join("parakeet").join(model_size.model_name());
+        if model_dir.exists() {
+            fs::remove_dir_all(&model_dir)
+                .await
+                .map_err(|e| format!("Failed to delete model: {}", e))?;
+        }
+        Ok(())
+    }
 }

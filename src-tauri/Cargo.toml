@@ -24,6 +24,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 tokio = { version = "1.35", features = ["full"] }
 cpal = "0.15"
 hound = "3.5"
@@ -44,8 +45,11 @@ keyring = "3"
 # Vosk speech recognition
 vosk = "0.2"
 
-# Sherpa-ONNX for Parakeet (optional - requires native build tools)
-sherpa-rs = { version = "0.1", optional = true }
+# ONNX Runtime for Parakeet (pure Rust, no CMake)
+tract-onnx = "0.21"
+
+# Image loading for tray icon
+image = "0.25"
 
 # Audio decoding multi-format
 symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "ogg", "vorbis"] }
@@ -56,9 +60,9 @@ rubato = "0.15"
 # Zip extraction for model downloads
 zip = "0.6"
 
+
 [features]
 default = []
-parakeet = ["sherpa-rs"]
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
