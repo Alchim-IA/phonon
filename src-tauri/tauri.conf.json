@@ -48,7 +48,12 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/models/ggml-tiny.bin"
+      "resources/models/ggml-tiny.bin",
+      "icons/tray-iconTemplate.png",
+      "icons/tray-iconTemplate@2x.png"
+    ],
+    "externalBin": [
+      "binaries/parakeet-coreml"
     ]
   }
 }

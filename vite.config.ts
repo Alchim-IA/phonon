@@ -39,5 +39,12 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // 4. Serve additional HTML files in dev mode
+    fs: {
+      allow: [".."],
+    },
   },
+
+  // Allow importing .html files and resolve them properly
+  appType: "mpa",
 }));

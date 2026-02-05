@@ -21,6 +21,7 @@ pub fn update_settings(
     let ptt_hotkey_changed = old_settings.hotkey_push_to_talk != new_settings.hotkey_push_to_talk;
     let translate_hotkey_changed = old_settings.hotkey_translate != new_settings.hotkey_translate;
     let translation_enabled_changed = old_settings.translation_enabled != new_settings.translation_enabled;
+    let engine_type_changed = old_settings.engine_type != new_settings.engine_type;
 
     // Sauvegarder les nouveaux settings
     config::save_settings(&new_settings)?;
@@ -29,6 +30,13 @@ pub fn update_settings(
     {
         let mut settings = state.settings.write().map_err(|e| e.to_string())?;
         *settings = new_settings.clone();
+    }
+
+    // Si le type d'engine a changé, recharger l'engine
+    if engine_type_changed {
+        if let Err(e) = state.switch_engine_type(new_settings.engine_type) {
+            log::warn!("Failed to switch engine type: {}. Model may need to be downloaded first.", e);
+        }
     }
 
     // Si le raccourci PTT a changé, le réenregistrer

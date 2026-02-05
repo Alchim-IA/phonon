@@ -1,13 +1,19 @@
 use crate::engines::traits::SpeechEngine;
 use crate::types::TranscriptionResult;
 use chrono::Utc;
+use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
+use tract_onnx::prelude::*;
+
+type TractModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
 
 /// Parakeet model size options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParakeetModelSize {
     #[default]
-    Tdt06bV3, // parakeet-tdt-0.6b-v3 - multilingual
+    Tdt06bV3,
 }
 
 impl ParakeetModelSize {
@@ -19,7 +25,7 @@ impl ParakeetModelSize {
 
     pub fn display_name(&self) -> &'static str {
         match self {
-            ParakeetModelSize::Tdt06bV3 => "Parakeet TDT 0.6B v3 (Multilingual)",
+            ParakeetModelSize::Tdt06bV3 => "Parakeet TDT 0.6B v3",
         }
     }
 }
@@ -33,9 +39,11 @@ impl From<crate::types::ParakeetModelSize> for ParakeetModelSize {
 }
 
 pub struct ParakeetEngine {
-    model_path: std::path::PathBuf,
-    language: Option<String>,
+    encoder: Mutex<TractModel>,
+    decoder_joint: Mutex<TractModel>,
+    vocab: HashMap<i64, String>,
     model_size: ParakeetModelSize,
+    blank_id: i64,
 }
 
 impl ParakeetEngine {
@@ -46,24 +54,257 @@ impl ParakeetEngine {
             return Err(format!("Parakeet model not found: {:?}", model_path));
         }
 
-        // Note: Full sherpa-rs integration requires native compilation
-        // This is a placeholder that will be expanded when sherpa-rs is available
+        // HuggingFace istupakov/parakeet-tdt-0.6b-v3-onnx format (non-quantized)
+        let encoder_file = model_path.join("encoder-model.onnx");
+        let decoder_joint_file = model_path.join("decoder_joint-model.onnx");
+        let vocab_file = model_path.join("vocab.txt");
 
-        log::info!("Parakeet model path verified: {:?}", model_path);
+        // Check all required files
+        for (name, path) in [
+            ("Encoder", &encoder_file),
+            ("Decoder+Joiner", &decoder_joint_file),
+            ("Vocab", &vocab_file),
+        ] {
+            if !path.exists() {
+                return Err(format!("{} file not found: {:?}", name, path));
+            }
+        }
+
+        // Load encoder with tract-onnx
+        log::info!("Loading encoder with tract-onnx...");
+        let encoder = tract_onnx::onnx()
+            .model_for_path(&encoder_file)
+            .map_err(|e| format!("Failed to load encoder model: {}", e))?
+            .into_optimized()
+            .map_err(|e| format!("Failed to optimize encoder: {}", e))?
+            .into_runnable()
+            .map_err(|e| format!("Failed to make encoder runnable: {}", e))?;
+
+        // Load decoder+joiner with tract-onnx
+        log::info!("Loading decoder+joiner with tract-onnx...");
+        let decoder_joint = tract_onnx::onnx()
+            .model_for_path(&decoder_joint_file)
+            .map_err(|e| format!("Failed to load decoder+joiner model: {}", e))?
+            .into_optimized()
+            .map_err(|e| format!("Failed to optimize decoder+joiner: {}", e))?
+            .into_runnable()
+            .map_err(|e| format!("Failed to make decoder+joiner runnable: {}", e))?;
+
+        // Load vocabulary
+        let vocab_content = fs::read_to_string(&vocab_file)
+            .map_err(|e| format!("Failed to read vocab file: {}", e))?;
+
+        let mut vocab = HashMap::new();
+        for (idx, line) in vocab_content.lines().enumerate() {
+            let token = line.trim().to_string();
+            vocab.insert(idx as i64, token);
+        }
+
+        let blank_id = 0i64;
+
+        log::info!(
+            "Parakeet model loaded successfully ({} tokens)",
+            vocab.len()
+        );
 
         Ok(Self {
-            model_path: model_path.to_path_buf(),
-            language: None,
+            encoder: Mutex::new(encoder),
+            decoder_joint: Mutex::new(decoder_joint),
+            vocab,
             model_size,
+            blank_id,
         })
     }
 
-    pub fn model_size(&self) -> ParakeetModelSize {
-        self.model_size
+    /// Compute mel-spectrogram features (80 mel bins)
+    fn compute_features(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
+        let n_fft = 512;
+        let hop_length = 160;
+        let n_mels = 80;
+        let fmin = 0.0;
+        let fmax = 8000.0;
+
+        let num_frames = if audio.len() > n_fft {
+            (audio.len() - n_fft) / hop_length + 1
+        } else {
+            1
+        };
+
+        let mut mel_spec = vec![0.0f32; n_mels * num_frames];
+        let mel_filters = Self::create_mel_filterbank(n_fft, sample_rate, n_mels, fmin, fmax);
+
+        for frame_idx in 0..num_frames {
+            let start = frame_idx * hop_length;
+            let end = (start + n_fft).min(audio.len());
+
+            let mut frame = vec![0.0f32; n_fft];
+            for (i, &sample) in audio[start..end].iter().enumerate() {
+                let window =
+                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n_fft - 1) as f32).cos());
+                frame[i] = sample * window;
+            }
+
+            let mut magnitudes = vec![0.0f32; n_fft / 2 + 1];
+            for k in 0..=n_fft / 2 {
+                let mut real = 0.0f32;
+                let mut imag = 0.0f32;
+                for (n, &x) in frame.iter().enumerate() {
+                    let angle = -2.0 * std::f32::consts::PI * k as f32 * n as f32 / n_fft as f32;
+                    real += x * angle.cos();
+                    imag += x * angle.sin();
+                }
+                magnitudes[k] = (real * real + imag * imag).sqrt();
+            }
+
+            for mel_idx in 0..n_mels {
+                let mut energy = 0.0f32;
+                for (freq_idx, &mag) in magnitudes.iter().enumerate() {
+                    energy += mag * mel_filters[mel_idx * (n_fft / 2 + 1) + freq_idx];
+                }
+                mel_spec[mel_idx * num_frames + frame_idx] = (energy.max(1e-10)).ln();
+            }
+        }
+
+        // Normalize
+        let mean: f32 = mel_spec.iter().sum::<f32>() / mel_spec.len() as f32;
+        let variance: f32 = mel_spec.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / mel_spec.len() as f32;
+        let std = variance.sqrt().max(1e-5);
+
+        for val in &mut mel_spec {
+            *val = (*val - mean) / std;
+        }
+
+        mel_spec
     }
 
-    pub fn set_language(&mut self, language: Option<String>) {
-        self.language = language;
+    fn create_mel_filterbank(
+        n_fft: usize,
+        sample_rate: u32,
+        n_mels: usize,
+        fmin: f32,
+        fmax: f32,
+    ) -> Vec<f32> {
+        let n_freqs = n_fft / 2 + 1;
+        let mut filterbank = vec![0.0f32; n_mels * n_freqs];
+
+        let hz_to_mel = |hz: f32| 2595.0 * (1.0 + hz / 700.0).log10();
+        let mel_to_hz = |mel: f32| 700.0 * (10.0f32.powf(mel / 2595.0) - 1.0);
+
+        let mel_min = hz_to_mel(fmin);
+        let mel_max = hz_to_mel(fmax);
+
+        let mel_points: Vec<f32> = (0..=n_mels + 1)
+            .map(|i| mel_min + (mel_max - mel_min) * i as f32 / (n_mels + 1) as f32)
+            .collect();
+
+        let hz_points: Vec<f32> = mel_points.iter().map(|&m| mel_to_hz(m)).collect();
+        let bin_points: Vec<usize> = hz_points
+            .iter()
+            .map(|&hz| ((n_fft as f32 + 1.0) * hz / sample_rate as f32).floor() as usize)
+            .collect();
+
+        for m in 0..n_mels {
+            let start = bin_points[m];
+            let center = bin_points[m + 1];
+            let end = bin_points[m + 2];
+
+            for k in start..center {
+                if k < n_freqs && center > start {
+                    filterbank[m * n_freqs + k] = (k - start) as f32 / (center - start) as f32;
+                }
+            }
+
+            for k in center..end {
+                if k < n_freqs && end > center {
+                    filterbank[m * n_freqs + k] = (end - k) as f32 / (end - center) as f32;
+                }
+            }
+        }
+
+        filterbank
+    }
+
+    fn decode_tokens(&self, token_ids: &[i64]) -> String {
+        let mut text = String::new();
+
+        for &id in token_ids {
+            if id == self.blank_id {
+                continue;
+            }
+            if let Some(token) = self.vocab.get(&id) {
+                // Handle SentencePiece tokens (underscore = space)
+                let token = token.replace("▁", " ");
+                text.push_str(&token);
+            }
+        }
+
+        text.trim().to_string()
+    }
+
+    fn greedy_decode(
+        &self,
+        encoder_out: &tract_ndarray::ArrayD<f32>,
+    ) -> Result<Vec<i64>, String> {
+        let shape = encoder_out.shape();
+        let time_steps = shape[1];
+        let encoder_dim = shape[2];
+
+        let mut decoded_tokens: Vec<i64> = Vec::new();
+        let decoder_joint = self.decoder_joint.lock().map_err(|e| e.to_string())?;
+
+        // Initial decoder state
+        let mut last_token = self.blank_id;
+
+        for t in 0..time_steps {
+            // Get encoder frame at timestep t
+            let encoder_frame: Vec<f32> = (0..encoder_dim)
+                .map(|d| encoder_out[[0, t, d]])
+                .collect();
+
+            // Create input tensors for decoder+joiner
+            // Shape: [batch=1, time=1, features]
+            let encoder_tensor: Tensor = tract_ndarray::Array3::from_shape_vec(
+                (1, 1, encoder_dim),
+                encoder_frame,
+            )
+            .map_err(|e| format!("Encoder tensor error: {}", e))?
+            .into();
+
+            // Decoder input: previous token
+            let decoder_input: Tensor = tract_ndarray::Array2::from_shape_vec(
+                (1, 1),
+                vec![last_token],
+            )
+            .map_err(|e| format!("Decoder input error: {}", e))?
+            .into();
+
+            // Run decoder+joiner
+            let inputs = tvec![encoder_tensor.into(), decoder_input.into()];
+            let outputs = decoder_joint
+                .run(inputs)
+                .map_err(|e| format!("Decoder+joiner error: {}", e))?;
+
+            let logits = outputs[0]
+                .to_array_view::<f32>()
+                .map_err(|e| format!("Output error: {}", e))?;
+
+            // Find argmax
+            let mut max_idx = 0i64;
+            let mut max_val = f32::NEG_INFINITY;
+            for (i, &val) in logits.iter().enumerate() {
+                if val > max_val {
+                    max_val = val;
+                    max_idx = i as i64;
+                }
+            }
+
+            if max_idx != self.blank_id {
+                decoded_tokens.push(max_idx);
+                last_token = max_idx;
+            }
+        }
+
+        Ok(decoded_tokens)
     }
 }
 
@@ -80,38 +321,74 @@ impl SpeechEngine for ParakeetEngine {
 
         let duration_seconds = audio.len() as f32 / sample_rate as f32;
 
-        // Placeholder: sherpa-rs integration would go here
-        // For now, return an error indicating the engine needs native compilation
-        #[cfg(not(feature = "parakeet"))]
-        {
-            let _ = (start_time, duration_seconds);
-            return Err(
-                "Parakeet engine requires building with --features parakeet (needs CMake)"
-                    .to_string(),
-            );
+        if duration_seconds < 0.1 {
+            return Err("Audio too short".to_string());
         }
 
-        #[cfg(feature = "parakeet")]
-        {
-            // TODO: Implement actual sherpa-rs transcription
-            // This requires the sherpa-rs crate to be properly compiled with CMake
-            let _ = audio;
+        // Compute mel-spectrogram features
+        let n_mels = 80;
+        let features = self.compute_features(audio, sample_rate);
+        let num_frames = features.len() / n_mels;
 
-            let processing_time_ms = start_time.elapsed().as_millis() as u64;
-
-            Ok(TranscriptionResult {
-                text: String::new(),
-                confidence: 0.0,
-                duration_seconds,
-                processing_time_ms,
-                detected_language: self.language.clone(),
-                timestamp: Utc::now().timestamp(),
-            })
+        // Create encoder input tensor [batch, time, features]
+        // Note: features is [n_mels, num_frames], need to transpose to [num_frames, n_mels]
+        let mut transposed = vec![0.0f32; num_frames * n_mels];
+        for mel in 0..n_mels {
+            for frame in 0..num_frames {
+                transposed[frame * n_mels + mel] = features[mel * num_frames + frame];
+            }
         }
+
+        let features_tensor: Tensor = tract_ndarray::Array3::from_shape_vec(
+            (1, num_frames, n_mels),
+            transposed,
+        )
+        .map_err(|e| format!("Failed to create features tensor: {}", e))?
+        .into();
+
+        // Run encoder
+        let encoder = self.encoder.lock().map_err(|e| e.to_string())?;
+        let encoder_outputs = encoder
+            .run(tvec![features_tensor.into()])
+            .map_err(|e| format!("Encoder error: {}", e))?;
+
+        let encoder_out = encoder_outputs[0]
+            .to_array_view::<f32>()
+            .map_err(|e| format!("Encoder output error: {}", e))?;
+
+        let encoder_out_owned = encoder_out.to_owned().into_dyn();
+
+        drop(encoder);
+
+        // Greedy decode
+        let token_ids = self.greedy_decode(&encoder_out_owned)?;
+        let text = self.decode_tokens(&token_ids);
+
+        let processing_time_ms = start_time.elapsed().as_millis() as u64;
+
+        log::info!(
+            "Parakeet transcription completed in {}ms: {} chars",
+            processing_time_ms,
+            text.len()
+        );
+
+        Ok(TranscriptionResult {
+            text,
+            confidence: 0.9,
+            duration_seconds,
+            processing_time_ms,
+            detected_language: Some("auto".to_string()),
+            timestamp: Utc::now().timestamp(),
+            model_used: Some(self.model_display_name()),
+        })
     }
 
     fn name(&self) -> &str {
         "Parakeet"
+    }
+
+    fn model_display_name(&self) -> String {
+        format!("Parakeet {}", self.model_size.display_name())
     }
 }
 

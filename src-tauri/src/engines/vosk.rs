@@ -81,11 +81,16 @@ impl SpeechEngine for VoskEngine {
             processing_time_ms,
             detected_language: Some(format!("{:?}", self.language).to_lowercase()),
             timestamp: Utc::now().timestamp(),
+            model_used: Some(self.model_display_name()),
         })
     }
 
     fn name(&self) -> &str {
         "Vosk"
+    }
+
+    fn model_display_name(&self) -> String {
+        format!("Vosk {}", self.language.display_name())
     }
 }
 

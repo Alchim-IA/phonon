@@ -214,6 +214,8 @@ pub struct TranscriptionResult {
     pub processing_time_ms: u64,
     pub detected_language: Option<String>,
     pub timestamp: i64,
+    #[serde(default)]
+    pub model_used: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
