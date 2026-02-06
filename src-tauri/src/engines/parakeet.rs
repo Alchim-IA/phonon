@@ -116,6 +116,48 @@ impl ParakeetEngine {
         })
     }
 
+    /// Radix-2 Cooley-Tukey FFT (in-place, n must be power of 2)
+    fn fft(buf: &mut [(f32, f32)]) {
+        let n = buf.len();
+        if n <= 1 {
+            return;
+        }
+
+        // Bit-reversal permutation
+        let mut j = 0usize;
+        for i in 1..n {
+            let mut bit = n >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
+            j ^= bit;
+            if i < j {
+                buf.swap(i, j);
+            }
+        }
+
+        // Butterfly passes
+        let mut len = 2;
+        while len <= n {
+            let half = len / 2;
+            let angle = -2.0 * std::f32::consts::PI / len as f32;
+            let wn = (angle.cos(), angle.sin());
+            for i in (0..n).step_by(len) {
+                let mut w = (1.0f32, 0.0f32);
+                for k in 0..half {
+                    let u = buf[i + k];
+                    let t = buf[i + k + half];
+                    let v = (t.0 * w.0 - t.1 * w.1, t.0 * w.1 + t.1 * w.0);
+                    buf[i + k] = (u.0 + v.0, u.1 + v.1);
+                    buf[i + k + half] = (u.0 - v.0, u.1 - v.1);
+                    w = (w.0 * wn.0 - w.1 * wn.1, w.0 * wn.1 + w.1 * wn.0);
+                }
+            }
+            len <<= 1;
+        }
+    }
+
     /// Compute mel-spectrogram features (80 mel bins)
     fn compute_features(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
         let n_fft = 512;
@@ -133,33 +175,36 @@ impl ParakeetEngine {
         let mut mel_spec = vec![0.0f32; n_mels * num_frames];
         let mel_filters = Self::create_mel_filterbank(n_fft, sample_rate, n_mels, fmin, fmax);
 
+        // Pre-compute Hann window
+        let window: Vec<f32> = (0..n_fft)
+            .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n_fft - 1) as f32).cos()))
+            .collect();
+
+        let mut fft_buf = vec![(0.0f32, 0.0f32); n_fft];
+
         for frame_idx in 0..num_frames {
             let start = frame_idx * hop_length;
             let end = (start + n_fft).min(audio.len());
 
-            let mut frame = vec![0.0f32; n_fft];
-            for (i, &sample) in audio[start..end].iter().enumerate() {
-                let window =
-                    0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (n_fft - 1) as f32).cos());
-                frame[i] = sample * window;
+            // Apply window and fill FFT buffer
+            for i in 0..n_fft {
+                fft_buf[i] = if start + i < end {
+                    (audio[start + i] * window[i], 0.0)
+                } else {
+                    (0.0, 0.0)
+                };
             }
 
-            let mut magnitudes = vec![0.0f32; n_fft / 2 + 1];
-            for k in 0..=n_fft / 2 {
-                let mut real = 0.0f32;
-                let mut imag = 0.0f32;
-                for (n, &x) in frame.iter().enumerate() {
-                    let angle = -2.0 * std::f32::consts::PI * k as f32 * n as f32 / n_fft as f32;
-                    real += x * angle.cos();
-                    imag += x * angle.sin();
-                }
-                magnitudes[k] = (real * real + imag * imag).sqrt();
-            }
+            Self::fft(&mut fft_buf);
 
+            // Compute magnitudes and apply mel filterbank
             for mel_idx in 0..n_mels {
                 let mut energy = 0.0f32;
-                for (freq_idx, &mag) in magnitudes.iter().enumerate() {
-                    energy += mag * mel_filters[mel_idx * (n_fft / 2 + 1) + freq_idx];
+                let filter_offset = mel_idx * (n_fft / 2 + 1);
+                for freq_idx in 0..=n_fft / 2 {
+                    let (re, im) = fft_buf[freq_idx];
+                    let mag = (re * re + im * im).sqrt();
+                    energy += mag * mel_filters[filter_offset + freq_idx];
                 }
                 mel_spec[mel_idx * num_frames + frame_idx] = (energy.max(1e-10)).ln();
             }

@@ -54,14 +54,15 @@ impl SpeechEngine for VoskEngine {
 
         recognizer.set_words(true);
 
-        // Convert f32 to i16 for Vosk
-        let audio_i16: Vec<i16> = audio
-            .iter()
-            .map(|&s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
-            .collect();
-
-        // Process audio
-        recognizer.accept_waveform(&audio_i16);
+        // Process audio in chunks to avoid full i16 buffer allocation
+        const CHUNK_SIZE: usize = 4096;
+        for chunk in audio.chunks(CHUNK_SIZE) {
+            let chunk_i16: Vec<i16> = chunk
+                .iter()
+                .map(|&s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
+                .collect();
+            recognizer.accept_waveform(&chunk_i16);
+        }
 
         let result = recognizer.final_result();
         let text = result.single().map(|r| r.text.to_string()).unwrap_or_default();
