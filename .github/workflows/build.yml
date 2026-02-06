@@ -59,10 +59,13 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake --installargs '"ADD_CMAKE_TO_PATH=System"' -y
 
-      - name: Set macOS build flags
+      - name: Set macOS build environment
         if: runner.os == 'macOS'
         run: |
           echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+          # Force cmake deployment target via toolchain file (cmake 3.21+ reads from env)
+          echo 'set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)' > /tmp/deploy.cmake
+          echo "CMAKE_TOOLCHAIN_FILE=/tmp/deploy.cmake" >> $GITHUB_ENV
           EXTRA_FLAGS="-mmacosx-version-min=11.0"
           if [ "${{ matrix.rust-targets }}" = "aarch64-apple-darwin" ]; then
             EXTRA_FLAGS="$EXTRA_FLAGS -U__ARM_FEATURE_MATMUL_INT8"
