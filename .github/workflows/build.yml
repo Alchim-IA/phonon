@@ -59,15 +59,16 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake --installargs '"ADD_CMAKE_TO_PATH=System"' -y
 
-      - name: Set macOS deployment target
+      - name: Set macOS build flags
         if: runner.os == 'macOS'
-        run: echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
-
-      - name: Fix whisper.cpp i8mm build on Apple Silicon
-        if: matrix.rust-targets == 'aarch64-apple-darwin'
         run: |
-          echo "CFLAGS=-U__ARM_FEATURE_MATMUL_INT8" >> $GITHUB_ENV
-          echo "CXXFLAGS=-U__ARM_FEATURE_MATMUL_INT8" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+          EXTRA_FLAGS="-mmacosx-version-min=11.0"
+          if [ "${{ matrix.rust-targets }}" = "aarch64-apple-darwin" ]; then
+            EXTRA_FLAGS="$EXTRA_FLAGS -U__ARM_FEATURE_MATMUL_INT8"
+          fi
+          echo "CFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci
