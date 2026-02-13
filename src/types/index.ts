@@ -83,6 +83,7 @@ export interface AppSettings {
   hotkey_translate: string;
   hotkey_voice_action: string;
   onboarding_completed: boolean;
+  tour_completed: boolean;
 }
 
 export interface VoskModelInfo {

@@ -45,6 +45,7 @@ const defaultSettings: AppSettings = {
   hotkey_translate: 'Control+Alt+T',
   hotkey_voice_action: 'Control+Alt+A',
   onboarding_completed: false,
+  tour_completed: false,
 };
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({

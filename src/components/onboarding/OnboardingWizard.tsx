@@ -82,7 +82,7 @@ export function OnboardingWizard() {
         </div>
 
         {/* Step content */}
-        <div className="glass-panel w-full max-w-[700px] p-8 animate-fade-in flex-shrink-0">
+        <div className="glass-panel w-full max-w-[700px] p-8 animate-fade-in flex-shrink-0 !overflow-visible">
           <StepComponent onValidChange={setStepValid} />
         </div>
 

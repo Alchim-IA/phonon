@@ -350,6 +350,8 @@ pub struct AppSettings {
     pub local_llm_model: LocalLlmModel,
     #[serde(default)]
     pub onboarding_completed: bool,
+    #[serde(default)]
+    pub tour_completed: bool,
 }
 
 fn default_true() -> bool {
@@ -400,6 +402,7 @@ impl Default for AppSettings {
             llm_provider: LlmProvider::default(),
             local_llm_model: LocalLlmModel::default(),
             onboarding_completed: false,
+            tour_completed: false,
         }
     }
 }

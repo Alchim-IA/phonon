@@ -11,6 +11,7 @@ import { useHotkeys } from './hooks/useHotkeys';
 import { GroqQuota } from './types';
 import logoSvg from './assets/logo.svg';
 import { OnboardingWizard } from './components/onboarding';
+import { TourGuide } from './components/tour';
 
 type Tab = 'dictation' | 'history' | 'files';
 type AppStatus = 'idle' | 'recording' | 'translating' | 'voice-action';
@@ -128,7 +129,7 @@ function App() {
       {/* Main content wrapper */}
       <div className="relative z-10 h-full flex flex-col">
         {/* Header */}
-        <header className="flex-shrink-0 px-6 py-4">
+        <header data-tour="tour-header" className="flex-shrink-0 px-6 py-4">
           <div className="glass-panel px-5 py-4 flex justify-between items-center">
             <div className="flex items-center gap-5">
               {/* Logo/Title */}
@@ -198,7 +199,7 @@ function App() {
         </header>
 
         {/* Navigation tabs */}
-        <nav className="flex-shrink-0 px-6">
+        <nav data-tour="tour-nav" className="flex-shrink-0 px-6">
           <div className="glass-panel overflow-hidden p-1">
             <div className="flex">
               <button
@@ -238,7 +239,7 @@ function App() {
         </nav>
 
         {/* Main content */}
-        <main className="flex-1 overflow-hidden px-6 py-4">
+        <main data-tour="tour-main" className="flex-1 overflow-hidden px-6 py-4">
           <div className="glass-panel h-full overflow-hidden">
             {activeTab === 'dictation' && <DictationPanel />}
             {activeTab === 'history' && <TranscriptionHistory />}
@@ -247,7 +248,7 @@ function App() {
         </main>
 
         {/* Footer status bar */}
-        <footer className="flex-shrink-0 px-6 pb-4">
+        <footer data-tour="tour-footer" className="flex-shrink-0 px-6 pb-4">
           <div className="glass-panel px-5 py-3 flex justify-between items-center overflow-visible">
             <div className="flex items-center gap-4">
               <span className="tag-frost">
@@ -328,6 +329,9 @@ function App() {
 
       {/* Settings Panel */}
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* Tour Guide */}
+      {settings.onboarding_completed && !settings.tour_completed && <TourGuide />}
     </div>
   );
 }
