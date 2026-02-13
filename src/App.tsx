@@ -104,7 +104,16 @@ function App() {
     }
   }, [settings?.floating_window_enabled]);
 
-  if (settings && !settings.onboarding_completed) {
+  if (!settings) {
+    return (
+      <div className="h-screen flex flex-col overflow-hidden relative">
+        <div className="mesh-gradient-bg" />
+        <div className="noise-overlay" />
+      </div>
+    );
+  }
+
+  if (!settings.onboarding_completed) {
     return <OnboardingWizard />;
   }
 
