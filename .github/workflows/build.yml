@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     tags: ['v*']
   workflow_dispatch:
 
@@ -72,6 +72,17 @@ jobs:
           echo "CFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
           echo "CXXFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
 
+      - name: Check Apple signing configuration
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "APPLE_SIGNING_CONFIGURED=true" >> $GITHUB_ENV
+          else
+            echo "APPLE_SIGNING_CONFIGURED=false" >> $GITHUB_ENV
+          fi
+
       - name: Download Whisper model (ggml-tiny.bin)
         shell: bash
         run: |
@@ -83,7 +94,7 @@ jobs:
         run: npm ci
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CONFIGURED == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -113,14 +124,28 @@ jobs:
           Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
           Remove-Item $certPath
 
-      - name: Build Tauri app
+      - name: Build Tauri app (signed + notarized)
+        if: runner.os != 'macOS' || env.APPLE_SIGNING_CONFIGURED == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: Scribe-v__VERSION__
+          releaseName: Scribe v__VERSION__
+          releaseBody: 'See the assets to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Build Tauri app (unsigned)
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_CONFIGURED != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: Scribe-v__VERSION__
           releaseName: Scribe v__VERSION__
