@@ -5,6 +5,7 @@ import { PermissionStep } from './PermissionStep';
 import { ModelStep } from './ModelStep';
 import { LanguageStep } from './LanguageStep';
 import { ShortcutsStep } from './ShortcutsStep';
+import { TestStep } from './TestStep';
 
 const STEPS = [
   { label: 'Bienvenue', component: WelcomeStep },
@@ -12,6 +13,7 @@ const STEPS = [
   { label: 'Modele', component: ModelStep },
   { label: 'Langue', component: LanguageStep },
   { label: 'Raccourcis', component: ShortcutsStep },
+  { label: 'Test', component: TestStep },
 ];
 
 export function OnboardingWizard() {
