@@ -41,6 +41,8 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             commands::list_audio_devices,
+            commands::start_mic_preview,
+            commands::stop_mic_preview,
             commands::get_settings,
             commands::update_settings,
             commands::get_dictionary,
