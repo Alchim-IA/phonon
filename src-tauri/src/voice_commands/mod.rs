@@ -1,4 +1,4 @@
-//! Voice commands module for WakaScribe
+//! Voice commands module for Phonon
 //!
 //! This module handles parsing of voice commands for punctuation,
 //! editing actions, and contextual commands based on dictation mode.

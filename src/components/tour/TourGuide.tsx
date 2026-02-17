@@ -11,7 +11,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     target: 'tour-header',
     title: 'En-tete',
-    description: 'Le logo WakaScribe et l\'indicateur de statut. Le point vert signifie que le systeme est pret.',
+    description: 'Le logo Phonon et l\'indicateur de statut. Le point vert signifie que le systeme est pret.',
   },
   {
     target: 'tour-nav',

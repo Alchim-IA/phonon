@@ -1,4 +1,4 @@
-//! Voice command parser for WakaScribe
+//! Voice command parser for Phonon
 //!
 //! Parses transcribed text to detect and replace punctuation commands,
 //! extract editing actions, and handle contextual commands based on dictation mode.

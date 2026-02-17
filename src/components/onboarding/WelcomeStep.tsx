@@ -8,13 +8,13 @@ export function WelcomeStep(_props: StepProps) {
   return (
     <div className="flex flex-col items-center text-center py-6">
       <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] flex items-center justify-center shadow-lg mb-6 overflow-visible">
-        <img src={logoSvg} alt="WakaScribe" className="w-96 h-96 invert" />
+        <img src={logoSvg} alt="Phonon" className="w-96 h-96" />
       </div>
 
       <h1 className="font-display text-3xl tracking-tight mb-3">
         <span className="text-[var(--text-primary)]">Bienvenue sur </span>
         <span className="bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] bg-clip-text text-transparent">
-          WakaScribe
+          Phonon
         </span>
       </h1>
 

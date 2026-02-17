@@ -119,7 +119,7 @@ fn create_tray_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, tauri::Error> 
 
     let help = MenuItem::with_id(app, "help", "Centre d'aide", true, None::<&str>)?;
     let feedback = MenuItem::with_id(app, "feedback", "Envoyer un commentaire", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quitter WakaScribe", true, Some("Cmd+Q"))?;
+    let quit = MenuItem::with_id(app, "quit", "Quitter Phonon", true, Some("Cmd+Q"))?;
 
     Menu::with_items(app, &[
         &home, &updates,

@@ -153,7 +153,7 @@ export function PermissionStep({ onValidChange }: StepProps) {
             L'acces au microphone est requis pour la dictee vocale.
           </p>
           <p className="text-[var(--text-muted)] text-[0.75rem] mb-4">
-            Autorisez WakaScribe dans Reglages Systeme &gt; Confidentialite et securite &gt; Microphone
+            Autorisez Phonon dans Reglages Systeme &gt; Confidentialite et securite &gt; Microphone
           </p>
           <button onClick={checkMicrophoneAccess} className="btn-glass">
             Reessayer

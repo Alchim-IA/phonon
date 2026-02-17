@@ -197,7 +197,7 @@ Suivez votre productivité vocale en temps réel :
 
 ### Drag & Drop de fichiers audio
 
-Glissez-déposez directement vos fichiers audio dans la fenêtre de WakaScribe :
+Glissez-déposez directement vos fichiers audio dans la fenêtre de Phonon :
 
 - Un overlay visuel apparaît pour indiquer la zone de dépôt
 - Les fichiers sont automatiquement ajoutés à l'onglet Fichiers
@@ -374,7 +374,7 @@ Phonon propose trois moteurs de transcription :
 
 Au premier lancement, un assistant vous guide en 5 étapes :
 
-1. **Bienvenue** — Présentation de WakaScribe
+1. **Bienvenue** — Présentation de Phonon
 2. **Microphone** — Demande de permission d'accès au micro
 3. **Modèle** — Choix et téléchargement du moteur de transcription
 4. **Langue** — Sélection de la langue de dictée

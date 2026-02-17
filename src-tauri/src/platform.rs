@@ -706,7 +706,7 @@ pub fn obsidian_create(vault_path: &str, title: &str, body: &str) -> Result<(), 
         .collect();
     let file_path = vault.join(format!("{}.md", safe_title.trim()));
 
-    let content = format!("# {}\n\n{}\n\n---\n*Cree par WakaScribe le {}*\n",
+    let content = format!("# {}\n\n{}\n\n---\n*Cree par Phonon le {}*\n",
         title, body, chrono::Local::now().format("%Y-%m-%d %H:%M"));
 
     std::fs::write(&file_path, content)
