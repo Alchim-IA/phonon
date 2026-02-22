@@ -2,6 +2,11 @@
   "bundle": {
     "externalBin": [
       "binaries/parakeet-coreml"
-    ]
+    ],
+    "macOS": {
+      "frameworks": [
+        "libs/libvosk.dylib"
+      ]
+    }
   }
 }

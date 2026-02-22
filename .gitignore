@@ -30,3 +30,6 @@ dist-ssr
 src-tauri/resources/openvino/*.dylib
 src-tauri/resources/openvino/*.so
 src-tauri/resources/models/*.bin
+
+# Vosk library (downloaded during build)
+src-tauri/libs/

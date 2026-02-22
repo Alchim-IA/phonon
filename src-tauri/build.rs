@@ -48,8 +48,10 @@ fn setup_vosk() {
 
     let lib_path = vosk_dir.join(lib_filename);
 
-    // Already downloaded
+    // Already downloaded - still need to ensure copies are in place
     if lib_path.exists() {
+        copy_to_target_dirs(&lib_path, lib_filename, &target);
+        ensure_libs_copy(&lib_path, lib_filename, &target);
         set_link_flags(&vosk_dir, &target);
         return;
     }
@@ -61,15 +63,18 @@ fn setup_vosk() {
         return;
     }
 
-    // macOS: fix install_name for runtime loading
+    // macOS: fix install_name for runtime loading (via Frameworks dir)
     if target.contains("apple") || target.contains("darwin") {
         let _ = Command::new("install_name_tool")
-            .args(["-id", "@executable_path/libvosk.dylib", lib_path.to_str().unwrap()])
+            .args(["-id", "@rpath/libvosk.dylib", lib_path.to_str().unwrap()])
             .status();
     }
 
     // Copy to target directories for runtime access
     copy_to_target_dirs(&lib_path, lib_filename, &target);
+
+    // macOS: copy to libs/ so Tauri can bundle it via frameworks config
+    ensure_libs_copy(&lib_path, lib_filename, &target);
 
     println!("cargo:warning=Vosk library downloaded successfully");
     set_link_flags(&vosk_dir, &target);
@@ -146,6 +151,18 @@ fn download_and_extract_vosk(
     Ok(())
 }
 
+fn ensure_libs_copy(lib_path: &PathBuf, lib_filename: &str, target: &str) {
+    if target.contains("apple") || target.contains("darwin") {
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let libs_dir = PathBuf::from(&manifest_dir).join("libs");
+        fs::create_dir_all(&libs_dir).ok();
+        let dest = libs_dir.join(lib_filename);
+        if !dest.exists() {
+            fs::copy(lib_path, &dest).ok();
+        }
+    }
+}
+
 fn set_link_flags(vosk_dir: &PathBuf, target: &str) {
     println!("cargo:rustc-link-search=native={}", vosk_dir.display());
     if target.contains("windows") {
@@ -161,8 +178,19 @@ fn copy_to_target_dirs(lib_path: &PathBuf, lib_filename: &str, target: &str) {
         Err(_) => return,
     };
 
-    for target_dir in ["debug", "release"] {
-        let dest_dir = PathBuf::from(&manifest_dir).join("target").join(target_dir);
+    let base = PathBuf::from(&manifest_dir).join("target");
+
+    // Copy to both plain target dirs and target-triple-specific dirs (for cross-compilation)
+    let mut dirs_to_copy = vec![
+        base.join("debug"),
+        base.join("release"),
+    ];
+    if !target.is_empty() {
+        dirs_to_copy.push(base.join(target).join("debug"));
+        dirs_to_copy.push(base.join(target).join("release"));
+    }
+
+    for dest_dir in dirs_to_copy {
         fs::create_dir_all(&dest_dir).ok();
         let dest_lib = dest_dir.join(lib_filename);
         if !dest_lib.exists() {
@@ -170,7 +198,7 @@ fn copy_to_target_dirs(lib_path: &PathBuf, lib_filename: &str, target: &str) {
                 // macOS: fix install_name on the copied file too
                 if target.contains("apple") || target.contains("darwin") {
                     let _ = Command::new("install_name_tool")
-                        .args(["-id", "@executable_path/libvosk.dylib", dest_lib.to_str().unwrap()])
+                        .args(["-id", "@rpath/libvosk.dylib", dest_lib.to_str().unwrap()])
                         .status();
                 }
             }
