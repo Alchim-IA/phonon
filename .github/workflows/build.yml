@@ -19,7 +19,11 @@ jobs:
             rust-targets: ''
             args: ''
             label: 'Windows x64'
-          - platform: macos-15-intel
+          - platform: ubuntu-22.04
+            rust-targets: ''
+            args: ''
+            label: 'Linux x64'
+          - platform: macos-13
             rust-targets: 'x86_64-apple-darwin'
             args: '--target x86_64-apple-darwin --config src-tauri/tauri.macos.conf.json'
             label: 'macOS Intel'
@@ -54,6 +58,12 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install cmake
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -134,8 +144,8 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: Scribe-v__VERSION__
-          releaseName: Scribe v__VERSION__
+          tagName: Phonon-v__VERSION__
+          releaseName: Phonon v__VERSION__
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false
@@ -147,8 +157,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: Scribe-v__VERSION__
-          releaseName: Scribe v__VERSION__
+          tagName: Phonon-v__VERSION__
+          releaseName: Phonon v__VERSION__
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false
