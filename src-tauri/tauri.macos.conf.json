@@ -6,7 +6,8 @@
     "macOS": {
       "frameworks": [
         "libs/libvosk.dylib"
-      ]
+      ],
+      "entitlements": "./Entitlements.plist"
     }
   }
 }
