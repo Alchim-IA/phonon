@@ -21,12 +21,8 @@ jobs:
             label: 'Windows x64'
           - platform: ubuntu-22.04
             rust-targets: ''
-            args: ''
+            args: '--bundles deb,rpm'
             label: 'Linux x64'
-          - platform: macos-13
-            rust-targets: 'x86_64-apple-darwin'
-            args: '--target x86_64-apple-darwin --config src-tauri/tauri.macos.conf.json'
-            label: 'macOS Intel'
           - platform: macos-latest
             rust-targets: 'aarch64-apple-darwin'
             args: '--target aarch64-apple-darwin --config src-tauri/tauri.macos.conf.json'
@@ -63,7 +59,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake libfuse2
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> $GITHUB_ENV
+          echo "NO_STRIP=true" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -73,12 +71,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
-          echo 'set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)' > /tmp/deploy.cmake
-          echo "CMAKE_TOOLCHAIN_FILE=/tmp/deploy.cmake" >> $GITHUB_ENV
-          EXTRA_FLAGS="-mmacosx-version-min=11.0"
-          if [ "${{ matrix.rust-targets }}" = "aarch64-apple-darwin" ]; then
-            EXTRA_FLAGS="$EXTRA_FLAGS -U__ARM_FEATURE_MATMUL_INT8"
-          fi
+          TOOLCHAIN_FILE="/tmp/deploy.cmake"
+          echo 'set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)' > "$TOOLCHAIN_FILE"
+          echo "CMAKE_TOOLCHAIN_FILE=$TOOLCHAIN_FILE" >> $GITHUB_ENV
+          EXTRA_FLAGS="-mmacosx-version-min=11.0 -U__ARM_FEATURE_MATMUL_INT8"
           echo "CFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
           echo "CXXFLAGS=$EXTRA_FLAGS" >> $GITHUB_ENV
 
@@ -143,6 +139,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
           tagName: Phonon-v__VERSION__
           releaseName: Phonon v__VERSION__
@@ -156,6 +153,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
           tagName: Phonon-v__VERSION__
           releaseName: Phonon v__VERSION__
