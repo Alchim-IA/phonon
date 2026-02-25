@@ -27,36 +27,50 @@ impl AppState {
             .map_err(|e| format!("Failed to get resource dir: {}", e))?;
 
         log::info!("Resource path from Tauri: {:?}", resource_path);
+        if let Ok(exe) = std::env::current_exe() {
+            log::info!("Current executable: {:?}", exe);
+        }
 
         // Trouver le chemin des modèles bundled
-        // En production: Contents/Resources/resources/models/
-        // En dev: src-tauri/resources/models/
-        let bundled_models_path = if resource_path.join("resources/models").exists() {
-            // Production bundle (Tauri met les fichiers dans resources/)
-            Some(resource_path.join("resources/models"))
-        } else if resource_path.join("models").exists() {
-            // Structure alternative
-            Some(resource_path.join("models"))
-        } else {
-            // Mode développement - chercher depuis l'exécutable
+        // Probe several possible locations for the whisper model
+        let candidates = [
+            // Production: Contents/Resources/resources/models/
+            resource_path.join("resources").join("models"),
+            // Alternative flat structure
+            resource_path.join("models"),
+            // Direct in resource dir (if Tauri flattens)
+            resource_path.clone(),
+        ];
+
+        let mut bundled_models_path: Option<PathBuf> = None;
+        for candidate in &candidates {
+            let model_file = candidate.join("ggml-tiny.bin");
+            log::info!("Probing model path: {:?} exists={}", model_file, model_file.exists());
+            if model_file.exists() {
+                log::info!("Found bundled models at: {:?}", candidate);
+                bundled_models_path = Some(candidate.clone());
+                break;
+            }
+        }
+
+        // Dev mode fallback - walk back from the executable
+        if bundled_models_path.is_none() {
             let dev_path = std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                .map(|p| p.join("resources/models"));
+                .map(|p| p.join("resources").join("models"));
 
             if let Some(ref path) = dev_path {
-                if path.exists() {
+                let model_file = path.join("ggml-tiny.bin");
+                log::info!("Probing dev model path: {:?} exists={}", model_file, model_file.exists());
+                if model_file.exists() {
                     log::info!("Using dev bundled models path: {:?}", path);
-                    Some(path.clone())
-                } else {
-                    None
+                    bundled_models_path = Some(path.clone());
                 }
-            } else {
-                None
             }
-        };
+        }
 
         log::info!("Bundled models path: {:?}", bundled_models_path);
 
