@@ -2,9 +2,10 @@ use crate::engines::traits::SpeechEngine;
 use crate::types::TranscriptionResult;
 use chrono::Utc;
 use serde::Deserialize;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 #[derive(Debug, Deserialize)]
 struct SidecarOutput {
@@ -12,10 +13,18 @@ struct SidecarOutput {
     confidence: f64,
     processing_time_ms: i64,
     error: Option<String>,
+    command: Option<String>,
+}
+
+struct DaemonProcess {
+    child: Child,
+    stdin: std::process::ChildStdin,
+    reader: BufReader<std::process::ChildStdout>,
 }
 
 pub struct ParakeetCoreMLEngine {
     sidecar_path: PathBuf,
+    daemon: Mutex<Option<DaemonProcess>>,
 }
 
 impl ParakeetCoreMLEngine {
@@ -27,8 +36,57 @@ impl ParakeetCoreMLEngine {
             ));
         }
 
-        log::info!("ParakeetCoreMLEngine initialized with sidecar: {:?}", sidecar_path);
-        Ok(Self { sidecar_path })
+        let mut engine = Self {
+            sidecar_path,
+            daemon: Mutex::new(None),
+        };
+
+        // Start the daemon and wait for it to be ready
+        engine.start_daemon()?;
+
+        log::info!("ParakeetCoreMLEngine initialized with persistent daemon");
+        Ok(engine)
+    }
+
+    fn start_daemon(&mut self) -> Result<(), String> {
+        let mut child = Command::new(&self.sidecar_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to start sidecar daemon: {}", e))?;
+
+        let stdin = child.stdin.take()
+            .ok_or("Failed to get stdin of sidecar daemon")?;
+        let stdout = child.stdout.take()
+            .ok_or("Failed to get stdout of sidecar daemon")?;
+
+        let mut reader = BufReader::new(stdout);
+
+        // Wait for the "ready" message
+        let mut line = String::new();
+        reader.read_line(&mut line)
+            .map_err(|e| format!("Failed to read ready message from daemon: {}", e))?;
+
+        let output: SidecarOutput = serde_json::from_str(line.trim())
+            .map_err(|e| format!("Failed to parse ready message: {} (got: {})", e, line.trim()))?;
+
+        if output.command.as_deref() != Some("ready") {
+            if let Some(error) = output.error {
+                return Err(format!("Daemon failed to start: {}", error));
+            }
+            return Err(format!("Expected ready message, got: {}", line.trim()));
+        }
+
+        log::info!("Parakeet CoreML daemon is ready");
+
+        *self.daemon.lock().map_err(|e| e.to_string())? = Some(DaemonProcess {
+            child,
+            stdin,
+            reader,
+        });
+
+        Ok(())
     }
 
     fn write_temp_wav(&self, audio: &[f32], sample_rate: u32) -> Result<PathBuf, String> {
@@ -79,25 +137,34 @@ impl SpeechEngine for ParakeetCoreMLEngine {
         // Write audio to temporary WAV file
         let temp_wav = self.write_temp_wav(audio, sample_rate)?;
 
-        // Call the sidecar
-        let output = Command::new(&self.sidecar_path)
-            .arg(temp_wav.to_str().unwrap())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| format!("Failed to run sidecar: {}", e))?;
+        let result = {
+            let mut daemon_guard = self.daemon.lock().map_err(|e| e.to_string())?;
+            let daemon = daemon_guard.as_mut()
+                .ok_or("Daemon not running")?;
+
+            // Send the request as a JSON line
+            let request = format!(
+                "{{\"audio_path\":\"{}\"}}\n",
+                temp_wav.to_str().unwrap().replace('\\', "\\\\").replace('"', "\\\"")
+            );
+            daemon.stdin.write_all(request.as_bytes())
+                .map_err(|e| format!("Failed to write to daemon stdin: {}", e))?;
+            daemon.stdin.flush()
+                .map_err(|e| format!("Failed to flush daemon stdin: {}", e))?;
+
+            // Read the response
+            let mut response_line = String::new();
+            daemon.reader.read_line(&mut response_line)
+                .map_err(|e| format!("Failed to read daemon response: {}", e))?;
+
+            let output: SidecarOutput = serde_json::from_str(response_line.trim())
+                .map_err(|e| format!("Failed to parse daemon output: {} (output: {})", e, response_line.trim()))?;
+
+            output
+        };
 
         // Clean up temp file
         let _ = std::fs::remove_file(&temp_wav);
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Sidecar failed: {}", stderr));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let result: SidecarOutput = serde_json::from_str(&stdout)
-            .map_err(|e| format!("Failed to parse sidecar output: {} (output: {})", e, stdout))?;
 
         if let Some(error) = result.error {
             return Err(error);
@@ -128,6 +195,25 @@ impl SpeechEngine for ParakeetCoreMLEngine {
 
     fn model_display_name(&self) -> String {
         "Parakeet TDT 0.6B v3 (CoreML)".to_string()
+    }
+}
+
+impl Drop for ParakeetCoreMLEngine {
+    fn drop(&mut self) {
+        if let Ok(mut daemon_guard) = self.daemon.lock() {
+            if let Some(mut daemon) = daemon_guard.take() {
+                // Try to send quit command gracefully
+                let quit_msg = b"{\"command\":\"quit\"}\n";
+                let _ = daemon.stdin.write_all(quit_msg);
+                let _ = daemon.stdin.flush();
+
+                // Wait briefly for graceful shutdown, then kill
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let _ = daemon.child.kill();
+                let _ = daemon.child.wait();
+                log::info!("Parakeet CoreML daemon stopped");
+            }
+        }
     }
 }
 

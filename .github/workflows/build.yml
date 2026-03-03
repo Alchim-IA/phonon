@@ -67,6 +67,13 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install cmake --installargs '"ADD_CMAKE_TO_PATH=System"' -y
 
+      - name: Build Parakeet CoreML sidecar (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd src-tauri/binaries/parakeet-coreml
+          swift build -c release
+          cp .build/release/parakeet-coreml ../parakeet-coreml-aarch64-apple-darwin
+
       - name: Set macOS build environment
         if: runner.os == 'macOS'
         run: |
