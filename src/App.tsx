@@ -145,6 +145,24 @@ function App() {
     }
   }, [settings?.llm_enabled, fetchGroqQuota]);
 
+  // Apply theme
+  useEffect(() => {
+    if (!settings?.theme) return;
+    const theme = settings.theme;
+    if (theme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+      const handler = (e: MediaQueryListEvent) => {
+        document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+      };
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  }, [settings?.theme]);
+
   useEffect(() => {
     if (settings?.floating_window_enabled) {
       invoke('show_floating_window').catch(console.error);

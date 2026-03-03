@@ -11,6 +11,27 @@ export function OptionsSection({ settings, updateSettings }: OptionsSectionProps
       <h3 className="section-title">Options</h3>
 
       <div className="space-y-3">
+        <div>
+          <label className="text-[0.8rem] text-[var(--text-muted)] mb-2 block">Theme</label>
+          <div className="flex gap-2">
+            {(['system', 'dark', 'light'] as const).map((theme) => (
+              <button
+                key={theme}
+                onClick={() => updateSettings({ theme })}
+                className={`flex-1 px-3 py-2.5 text-[0.8rem] font-medium rounded-xl border transition-all ${
+                  settings.theme === theme
+                    ? 'bg-[var(--accent-secondary-soft)] border-[var(--accent-secondary)] text-[var(--accent-secondary)]'
+                    : 'bg-[rgba(255,255,255,0.08)] border-[var(--glass-border)] text-[var(--text-muted)] hover:border-[var(--accent-secondary)]'
+                }`}
+              >
+                {theme === 'system' && 'Systeme'}
+                {theme === 'dark' && 'Sombre'}
+                {theme === 'light' && 'Clair'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <label className="checkbox-frost">
           <input
             type="checkbox"

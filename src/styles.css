@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
-:root {
+:root, [data-theme="dark"] {
   /* Deep void palette */
   --frost-deep: #060a12;
   --frost-base: #0a1020;
@@ -46,6 +46,45 @@
   --glow-secondary: 0 0 30px rgba(0, 184, 212, 0.4);
   --glow-success: 0 0 30px rgba(0, 255, 136, 0.4);
   --glow-danger: 0 0 30px rgba(255, 59, 59, 0.4);
+}
+
+[data-theme="light"] {
+  --frost-deep: #f0f4f8;
+  --frost-base: #e8eef4;
+  --frost-surface: rgba(0, 140, 180, 0.06);
+  --frost-elevated: rgba(0, 140, 180, 0.1);
+  --frost-hover: rgba(0, 140, 180, 0.15);
+
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 140, 180, 0.2);
+  --glass-border-light: rgba(0, 140, 180, 0.3);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+
+  --accent-primary: #0097a7;
+  --accent-primary-soft: rgba(0, 151, 167, 0.2);
+  --accent-secondary: #00838f;
+  --accent-secondary-soft: rgba(0, 131, 143, 0.2);
+  --accent-success: #00c853;
+  --accent-success-soft: rgba(0, 200, 83, 0.2);
+  --accent-warning: #f57f17;
+  --accent-warning-soft: rgba(245, 127, 23, 0.2);
+  --accent-danger: #d32f2f;
+  --accent-danger-soft: rgba(211, 47, 47, 0.2);
+
+  --mesh-1: #0097a7;
+  --mesh-2: #0066cc;
+  --mesh-3: #00838f;
+  --mesh-4: #00c853;
+
+  --text-primary: #1a2a3a;
+  --text-secondary: rgba(26, 42, 58, 0.75);
+  --text-muted: rgba(26, 42, 58, 0.5);
+  --text-subtle: rgba(26, 42, 58, 0.3);
+
+  --glow-primary: 0 0 20px rgba(0, 151, 167, 0.2);
+  --glow-secondary: 0 0 20px rgba(0, 131, 143, 0.2);
+  --glow-success: 0 0 20px rgba(0, 200, 83, 0.2);
+  --glow-danger: 0 0 20px rgba(211, 47, 47, 0.2);
 }
 
 * {
@@ -891,6 +930,108 @@ body {
   background-size: 200% 100%;
   animation: shimmer-frost 1.8s infinite;
   border-radius: 8px;
+}
+
+/* ============================================
+   LIGHT THEME OVERRIDES
+   ============================================ */
+[data-theme="light"] body {
+  background: var(--frost-deep);
+}
+
+[data-theme="light"] .glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .glass-panel::before {
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.06) 30%, rgba(0, 0, 0, 0.06) 70%, transparent 100%);
+}
+
+[data-theme="light"] .glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .glass-card:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 140, 180, 0.2);
+}
+
+[data-theme="light"] .input-glass,
+[data-theme="light"] .select-glass {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .input-glass:focus,
+[data-theme="light"] .select-glass:focus {
+  background: #fff;
+}
+
+[data-theme="light"] .select-glass option {
+  background: #fff;
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .checkbox-frost .check-box {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .checkbox-frost:hover .check-box {
+  background: rgba(255, 255, 255, 1);
+}
+
+[data-theme="light"] .radio-frost input {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .btn-glass {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .btn-glass:hover {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .result-card-frost {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .settings-panel-frost {
+  background: #f0f4f8 !important;
+}
+
+[data-theme="light"] .mesh-gradient-bg::before {
+  opacity: 0.08;
+}
+
+[data-theme="light"] .record-orb {
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.02));
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] .floating-window {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 /* ============================================

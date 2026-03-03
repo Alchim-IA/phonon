@@ -205,6 +205,7 @@ fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEng
     let start_time = std::time::Instant::now();
     let mut last_processed_samples: usize = 0;
     let chunk_samples = (STREAMING_CHUNK_DURATION_SECS * TARGET_SAMPLE_RATE as f32) as usize;
+    let mut accumulated_text: Vec<String> = Vec::new();
 
     while STREAMING_ACTIVE.load(Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -238,9 +239,8 @@ fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEng
 
             // Si nous avons assez de nouveaux échantillons pour un chunk
             if new_samples >= chunk_samples && current_samples >= chunk_samples {
-                // Prendre les derniers samples pour la transcription partielle
-                let chunk_start = current_samples.saturating_sub(chunk_samples);
-                let chunk_audio = &audio[chunk_start..];
+                // Transcribe the new segment (from last_processed to current)
+                let chunk_audio = &audio[last_processed_samples..current_samples];
 
                 // Resampling si nécessaire
                 let resampled = if sample_rate != TARGET_SAMPLE_RATE {
@@ -254,10 +254,13 @@ fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEng
                     if let Some(ref engine) = *engine_guard {
                         match engine.transcribe(&resampled, TARGET_SAMPLE_RATE) {
                             Ok(result) => {
-                                if !result.text.trim().is_empty() {
-                                    log::info!("Streaming chunk: '{}'", result.text);
+                                let trimmed = result.text.trim().to_string();
+                                if !trimmed.is_empty() {
+                                    accumulated_text.push(trimmed);
+                                    let full_text = accumulated_text.join(" ");
+                                    log::info!("Streaming chunk #{}: '{}'", accumulated_text.len(), accumulated_text.last().unwrap());
                                     emit_streaming_chunk(&app, StreamingChunkEvent {
-                                        text: result.text,
+                                        text: full_text,
                                         is_final: false,
                                         duration_seconds: elapsed,
                                     });
@@ -271,10 +274,10 @@ fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEng
                 }
 
                 last_processed_samples = current_samples;
-            } else {
-                // Émettre juste la durée pour indiquer que le streaming est actif
+            } else if !accumulated_text.is_empty() {
+                // Émettre le texte accumulé avec la durée mise à jour
                 emit_streaming_chunk(&app, StreamingChunkEvent {
-                    text: String::new(),
+                    text: accumulated_text.join(" "),
                     is_final: false,
                     duration_seconds: elapsed,
                 });
@@ -430,6 +433,25 @@ pub async fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> Resul
     emit_recording_status(&app, "idle");
 
     history::add_transcription(final_result.clone())?;
+
+    // Send notification if enabled
+    if state.settings.read().map(|s| s.notification_on_complete).unwrap_or(false) {
+        let word_count = final_result.text.split_whitespace().count();
+        let preview: String = final_result.text.chars().take(80).collect();
+        let body = if final_result.text.len() > 80 {
+            format!("{}... ({} mots)", preview, word_count)
+        } else {
+            format!("{} ({} mots)", preview, word_count)
+        };
+        if let Err(e) = tauri_plugin_notification::NotificationExt::notification(&app)
+            .builder()
+            .title("Transcription terminee")
+            .body(&body)
+            .show()
+        {
+            log::warn!("Failed to send notification: {}", e);
+        }
+    }
 
     // Record stats
     if state.settings.read().map(|s| s.stats_tracking_enabled).unwrap_or(true) {

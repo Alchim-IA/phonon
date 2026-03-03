@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use crate::hotkeys::parse_hotkey;
 use crate::state::AppState;
@@ -58,6 +58,9 @@ pub fn update_settings(
             }
         }
     }
+
+    // Notify all windows of settings change (for subtitles, floating window, etc.)
+    let _ = app.emit("settings-changed", &new_settings);
 
     Ok(())
 }

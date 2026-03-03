@@ -66,6 +66,22 @@ export function DictationSection({ settings, updateSettings }: DictationSectionP
           <span className="check-box" />
           <span className="check-label">Sous-titres en direct</span>
         </label>
+
+        {settings.subtitles_enabled && (
+          <div className="pl-8">
+            <label className="text-[0.8rem] text-[var(--text-muted)] mb-1 block">
+              Taille du texte : {settings.subtitles_font_size}px
+            </label>
+            <input
+              type="range"
+              min="12"
+              max="48"
+              value={settings.subtitles_font_size}
+              onChange={(e) => updateSettings({ subtitles_font_size: parseInt(e.target.value) })}
+              className="w-full accent-[var(--accent-primary)]"
+            />
+          </div>
+        )}
       </div>
     </section>
   );

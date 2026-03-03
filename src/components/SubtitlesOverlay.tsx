@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { AppSettings } from '../types';
 
 interface StreamingChunk {
   text: string;
@@ -10,7 +12,28 @@ interface StreamingChunk {
 export function SubtitlesOverlay() {
   const [text, setText] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  const [fontSize, setFontSize] = useState(20);
   const hideTimerRef = useRef<number | null>(null);
+
+  // Load font size from settings
+  useEffect(() => {
+    invoke<AppSettings>('get_settings')
+      .then((settings) => {
+        if (settings.subtitles_font_size) {
+          setFontSize(settings.subtitles_font_size);
+        }
+      })
+      .catch(console.error);
+
+    // Listen for settings changes
+    const unlisten = listen<AppSettings>('settings-changed', (event) => {
+      if (event.payload.subtitles_font_size) {
+        setFontSize(event.payload.subtitles_font_size);
+      }
+    });
+
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
 
   useEffect(() => {
     const unlisteners: Array<() => void> = [];
@@ -85,7 +108,7 @@ export function SubtitlesOverlay() {
         <p
           style={{
             color: 'white',
-            fontSize: '20px',
+            fontSize: `${fontSize}px`,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             fontWeight: 500,
             margin: 0,
