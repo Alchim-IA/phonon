@@ -303,25 +303,30 @@ pub async fn summarize_text_local(
 ) -> Result<String, String> {
     let settings = config::load_settings();
 
-    // Vérifier que le modèle est disponible
-    let model_path = model_manager
+    // Chercher un modèle disponible : d'abord le modèle sélectionné, puis n'importe lequel
+    let (model_path, model_size) = model_manager
         .get_llm_model_path(settings.local_llm_model)
-        .ok_or_else(|| format!(
-            "Modèle LLM {} non installé. Téléchargez-le dans les paramètres.",
-            settings.local_llm_model.display_name()
-        ))?;
+        .map(|p| (p, settings.local_llm_model))
+        .or_else(|| {
+            model_manager.available_llm_models().into_iter().find_map(|m| {
+                model_manager.get_llm_model_path(m).map(|p| (p, m))
+            })
+        })
+        .ok_or_else(|| "Aucun modèle LLM local installé. Téléchargez-en un dans les paramètres.".to_string())?;
 
-    // Charger le moteur si nécessaire
+    // Charger le moteur si nécessaire (ou recharger si le modèle a changé)
     {
         let engine_read = llm_engine.read().await;
-        if engine_read.is_none() {
+        let needs_reload = match engine_read.as_ref() {
+            None => true,
+            Some(engine) => engine.model_type() != model_size,
+        };
+        if needs_reload {
             drop(engine_read);
             let mut engine_write = llm_engine.write().await;
-            if engine_write.is_none() {
-                log::info!("Initializing Local LLM engine...");
-                let engine = LocalLlmEngine::new(&model_path, settings.local_llm_model)?;
-                *engine_write = Some(engine);
-            }
+            log::info!("Initializing Local LLM engine with {:?}...", model_size);
+            let engine = LocalLlmEngine::new(&model_path, model_size)?;
+            *engine_write = Some(engine);
         }
     }
 
