@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Manager};
 
+use crate::audio::AudioProcessor;
 use crate::engines::{ModelManager, ParakeetCoreMLEngine, ParakeetEngine, SpeechEngine, VoskEngine, WhisperEngine};
 use crate::storage::config;
 use crate::types::{AppSettings, EngineType, ModelSize, ParakeetModelSize, VoskLanguage};
@@ -14,6 +15,7 @@ pub struct AppState {
     pub model_manager: Arc<ModelManager>,
     pub resource_path: PathBuf,
     pub audio_buffer: Arc<RwLock<Option<(Vec<f32>, u32)>>>,
+    pub audio_processor: Arc<RwLock<AudioProcessor>>,
 }
 
 impl AppState {
@@ -192,6 +194,7 @@ impl AppState {
             model_manager: Arc::new(model_manager),
             resource_path,
             audio_buffer: Arc::new(RwLock::new(None)),
+            audio_processor: Arc::new(RwLock::new(AudioProcessor::new())),
         })
     }
 
