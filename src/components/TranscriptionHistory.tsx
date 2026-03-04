@@ -23,13 +23,11 @@ export function TranscriptionHistory() {
     loadHistory();
   }, [loadHistory]);
 
-  // Vérifier si le modèle LLM local est disponible
+  // Vérifier si au moins un modèle LLM local est disponible
   useEffect(() => {
-    if (settings?.local_llm_model) {
-      invoke<boolean>('is_llm_model_available', { modelSize: settings.local_llm_model })
-        .then(setLocalLlmAvailable)
-        .catch(() => setLocalLlmAvailable(false));
-    }
+    invoke<string[]>('get_available_llm_models')
+      .then(models => setLocalLlmAvailable(models.length > 0))
+      .catch(() => setLocalLlmAvailable(false));
   }, [settings?.local_llm_model]);
 
   // Vérifier si une clé Groq est configurée
