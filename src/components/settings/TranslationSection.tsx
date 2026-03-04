@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { AppSettings } from '../../types';
 import { HotkeyInput } from '../HotkeyInput';
 
@@ -8,6 +10,13 @@ interface TranslationSectionProps {
 }
 
 export function TranslationSection({ settings, updateSettings, apiKeyStatus }: TranslationSectionProps) {
+  const [localLlmAvailable, setLocalLlmAvailable] = useState(false);
+
+  useEffect(() => {
+    invoke<string[]>('get_available_llm_models')
+      .then(models => setLocalLlmAvailable(models.length > 0))
+      .catch(() => setLocalLlmAvailable(false));
+  }, [settings.local_llm_model]);
   return (
     <section className="space-y-4">
       <h3 className="section-title warning">Traduction</h3>
@@ -23,7 +32,7 @@ export function TranslationSection({ settings, updateSettings, apiKeyStatus }: T
           <div>
             <span className="check-label block">Traduction instantanee</span>
             <span className="text-[0.75rem] text-[var(--text-muted)]">
-              Traduit le texte du presse-papier via Groq
+              Traduit le texte du presse-papier via {settings.llm_provider === 'local' ? 'LLM local' : 'Groq'}
             </span>
           </div>
         </label>
@@ -63,10 +72,10 @@ export function TranslationSection({ settings, updateSettings, apiKeyStatus }: T
               </p>
             </div>
 
-            {!apiKeyStatus && (
+            {!apiKeyStatus && !localLlmAvailable && (
               <div className="glass-card p-4 border-[var(--accent-warning)]">
                 <p className="text-[0.8rem] text-[var(--accent-warning)]">
-                  ⚠️ Une cle API Groq est requise pour la traduction.
+                  Une cle API Groq ou un modele LLM local est requis pour la traduction.
                 </p>
               </div>
             )}
