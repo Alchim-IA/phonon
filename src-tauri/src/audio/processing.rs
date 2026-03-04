@@ -6,9 +6,8 @@ use nnnoiseless::DenoiseState;
 /// 1. Noise suppression (nnnoiseless/RNNoise) — at capture sample rate (48kHz)
 /// 2. [resampling happens externally to 16kHz]
 /// 3. Soft limiter — prevents clipping
-/// 4. AGC — dynamic gain adjustment
-/// 5. RMS normalization — locks level to -20 dBFS
-/// 6. VAD — detects speech presence
+/// 4. AGC — dynamic gain adjustment to -20 dBFS target
+/// 5. VAD — detects speech presence
 pub struct AudioProcessor {
     denoiser: Box<DenoiseState<'static>>,
     agc_gain: f32,
@@ -70,12 +69,15 @@ impl AudioProcessor {
     }
 
     /// Phase 2: Post-resample processing at 16kHz.
-    /// Applies: soft limiter → AGC → RMS normalization → VAD.
+    /// Applies: soft limiter → AGC → safety clamp → VAD.
     /// Returns (processed_audio, has_speech).
     pub fn process_post_resample(&mut self, audio: &[f32]) -> (Vec<f32>, bool) {
         let mut output = self.soft_limit(audio);
         self.apply_agc(&mut output);
-        self.normalize_rms(&mut output);
+        // Safety clamp after AGC to ensure [-1.0, 1.0] range
+        for sample in output.iter_mut() {
+            *sample = sample.clamp(-1.0, 1.0);
+        }
         let has_speech = self.detect_speech(&output);
         (output, has_speech)
     }
@@ -83,11 +85,16 @@ impl AudioProcessor {
     /// Noise suppression using nnnoiseless (RNNoise).
     /// Expects 48kHz audio in [-1.0, 1.0] range.
     /// nnnoiseless expects i16-scale floats [-32768.0, 32767.0].
+    /// Output length equals input length (no frame dropping).
     fn denoise(&mut self, audio: &[f32]) -> Vec<f32> {
         let frame_size = DenoiseState::FRAME_SIZE; // 480 samples
         let mut output = Vec::with_capacity(audio.len());
         let mut frame_output = vec![0.0f32; frame_size];
-        let mut first_frame = true;
+
+        // Prime the RNN state with a silent frame to avoid fade-in artifacts
+        // without dropping real audio data
+        let silent = vec![0.0f32; frame_size];
+        self.denoiser.process_frame(&mut frame_output, &silent);
 
         // Process complete frames
         let mut i = 0;
@@ -101,13 +108,8 @@ impl AudioProcessor {
             self.denoiser
                 .process_frame(&mut frame_output, &frame_input);
 
-            if first_frame {
-                // Discard first frame (RNNoise fade-in artifact)
-                first_frame = false;
-            } else {
-                // Convert back from i16-scale to [-1.0, 1.0]
-                output.extend(frame_output.iter().map(|&s| s / 32767.0));
-            }
+            // Convert back from i16-scale to [-1.0, 1.0]
+            output.extend(frame_output.iter().map(|&s| s / 32767.0));
 
             i += frame_size;
         }
@@ -120,11 +122,6 @@ impl AudioProcessor {
             }
             self.denoiser
                 .process_frame(&mut frame_output, &padded);
-
-            if first_frame {
-                // Edge case: audio shorter than one frame
-                // Still output it since we have nothing else
-            }
 
             let remaining = audio.len() - i;
             output.extend(
@@ -150,10 +147,11 @@ impl AudioProcessor {
                     // Above knee: hard limit
                     sample.signum() * LIMITER_THRESHOLD
                 } else {
-                    // In knee: smooth transition
+                    // In knee: quadratic gain reduction (never boosts)
                     let x = abs - (LIMITER_THRESHOLD - LIMITER_KNEE / 2.0);
-                    let gain = 1.0 - x / (2.0 * LIMITER_KNEE);
-                    sample.signum() * (abs * gain + LIMITER_THRESHOLD * (1.0 - gain))
+                    let ratio = x / LIMITER_KNEE; // 0..1 across the knee
+                    let gain_reduction = ratio * ratio * (1.0 - LIMITER_THRESHOLD / abs);
+                    sample * (1.0 - gain_reduction)
                 }
             })
             .collect()
@@ -188,26 +186,6 @@ impl AudioProcessor {
         }
     }
 
-    /// RMS normalization to target level (-20 dBFS).
-    fn normalize_rms(&self, audio: &mut [f32]) {
-        if audio.is_empty() {
-            return;
-        }
-
-        let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
-
-        if rms > 0.0001 {
-            let gain = TARGET_RMS / rms;
-            // Clamp gain to avoid extreme amplification
-            let gain = gain.clamp(AGC_MIN_GAIN, AGC_MAX_GAIN);
-            for sample in audio.iter_mut() {
-                *sample *= gain;
-                // Final safety clamp
-                *sample = sample.clamp(-1.0, 1.0);
-            }
-        }
-    }
-
     /// Voice Activity Detection based on energy and zero-crossing rate.
     /// Returns true if speech is detected in the audio.
     fn detect_speech(&mut self, audio: &[f32]) -> bool {
@@ -233,7 +211,7 @@ impl AudioProcessor {
                 .windows(2)
                 .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
                 .count() as f32
-                / frame.len() as f32;
+                / (frame.len() - 1).max(1) as f32;
 
             // Update adaptive noise floor (slow adaptation)
             if rms < self.noise_floor * 2.0 {
@@ -284,27 +262,36 @@ mod tests {
         let processor = AudioProcessor::new();
         let loud_audio: Vec<f32> = vec![1.0, -1.0, 0.95, -0.95, 1.5, -1.5];
         let limited = processor.soft_limit(&loud_audio);
-        for sample in &limited {
-            // Knee region extends above threshold, so allow knee/2 margin
+        for (orig, lim) in loud_audio.iter().zip(limited.iter()) {
+            // Limiter must never boost signal
             assert!(
-                sample.abs() <= LIMITER_THRESHOLD + LIMITER_KNEE / 2.0 + 0.01,
-                "Limiter should prevent clipping: got {}",
-                sample
+                lim.abs() <= orig.abs() + 1e-6,
+                "Limiter must never boost: input {} -> output {}",
+                orig, lim
             );
+            // Well above knee (abs >= 1.016), output must be at threshold
+            if orig.abs() >= LIMITER_THRESHOLD + LIMITER_KNEE / 2.0 {
+                assert!(
+                    (lim.abs() - LIMITER_THRESHOLD).abs() < 0.01,
+                    "Above knee, should hard-limit to threshold: got {}",
+                    lim
+                );
+            }
         }
     }
 
     #[test]
-    fn test_rms_normalization() {
-        let processor = AudioProcessor::new();
-        // Use a lower amplitude so gain doesn't hit the AGC_MIN_GAIN clamp
-        let mut audio: Vec<f32> = (0..16000).map(|i| (i as f32 * 0.1).sin() * 0.3).collect();
-        processor.normalize_rms(&mut audio);
-        let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
-        assert!(
-            (rms - TARGET_RMS).abs() < 0.02,
-            "RMS should be near target: got {}",
-            rms
+    fn test_denoise_preserves_length() {
+        let mut processor = AudioProcessor::new();
+        // Multi-frame audio at 48kHz (5 frames = 2400 samples)
+        let audio: Vec<f32> = (0..2400)
+            .map(|i| (i as f32 * 0.1).sin() * 0.3)
+            .collect();
+        let denoised = processor.process_pre_resample(&audio, 48000);
+        assert_eq!(
+            denoised.len(),
+            audio.len(),
+            "Denoise must preserve audio length"
         );
     }
 
