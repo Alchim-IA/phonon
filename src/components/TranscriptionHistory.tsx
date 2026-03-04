@@ -17,6 +17,7 @@ export function TranscriptionHistory() {
   const settings = useSettingsStore(state => state.settings);
   const [summaries, setSummaries] = useState<SummaryState>({});
   const [localLlmAvailable, setLocalLlmAvailable] = useState(false);
+  const [hasGroqKey, setHasGroqKey] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -30,6 +31,13 @@ export function TranscriptionHistory() {
         .catch(() => setLocalLlmAvailable(false));
     }
   }, [settings?.local_llm_model]);
+
+  // Vérifier si une clé Groq est configurée
+  useEffect(() => {
+    invoke<boolean>('has_groq_api_key')
+      .then(setHasGroqKey)
+      .catch(() => setHasGroqKey(false));
+  }, [settings?.groq_api_key]);
 
   const handleSummarize = useCallback(async (index: number, text: string, provider?: LlmProvider) => {
     setSummaries(prev => ({
@@ -145,7 +153,7 @@ export function TranscriptionHistory() {
                   >
                     <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
                   </button>
-                ) : localLlmAvailable && settings?.groq_api_key ? (
+                ) : localLlmAvailable && hasGroqKey ? (
                   <div className="relative group">
                     <button className="btn-glass text-[0.7rem] py-1 px-2 flex items-center gap-1">
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -174,7 +182,7 @@ export function TranscriptionHistory() {
                       </button>
                     </div>
                   </div>
-                ) : (localLlmAvailable || settings?.groq_api_key) ? (
+                ) : (localLlmAvailable || hasGroqKey) ? (
                   <button
                     onClick={() => handleSummarize(index, item.text)}
                     className="btn-glass text-[0.7rem] py-1 px-2"
