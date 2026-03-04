@@ -251,19 +251,23 @@ pub async fn download_llm_model(
 
     let manager = model_manager.inner().clone();
     let app_clone = app.clone();
+    let last_emitted = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     let result = manager
         .download_llm_model(model_size, move |downloaded, total| {
             let progress = (downloaded as f64 / total as f64 * 100.0) as u32;
-            if downloaded % (10 * 1024 * 1024) < 1024 * 1024 {
+            // Throttle: only emit every ~1MB or at 100%
+            let last = last_emitted.load(std::sync::atomic::Ordering::Relaxed);
+            if downloaded - last >= 1_000_000 || downloaded == total {
+                last_emitted.store(downloaded, std::sync::atomic::Ordering::Relaxed);
                 println!("[LLM] Download progress: {}% ({}/{})", progress, downloaded, total);
+                let _ = app_clone.emit("llm-download-progress", serde_json::json!({
+                    "model": model_size,
+                    "downloaded": downloaded,
+                    "total": total,
+                    "progress": progress
+                }));
             }
-            let _ = app_clone.emit("llm-download-progress", serde_json::json!({
-                "model": model_size,
-                "downloaded": downloaded,
-                "total": total,
-                "progress": progress
-            }));
         })
         .await;
 

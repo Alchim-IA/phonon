@@ -116,9 +116,7 @@ export function LlmSection({ settings, updateSettings, onApiKeyStatusChange }: L
     setLlmDownloadError(null);
     setLlmDownloadProgress({ downloaded: 0, total: 1, percent: 0 });
     try {
-      console.log('Starting LLM download for:', size);
       await invoke('download_llm_model', { modelSize: size });
-      console.log('LLM download completed for:', size);
       await loadLlmModels();
     } catch (e) {
       console.error('LLM download failed:', e);
