@@ -163,11 +163,7 @@ function App() {
     }
   }, [settings?.theme]);
 
-  useEffect(() => {
-    if (settings?.floating_window_enabled) {
-      invoke('show_floating_window').catch(console.error);
-    }
-  }, [settings?.floating_window_enabled]);
+  // Floating window is now controlled by PTT hotkey only
 
   if (!settings) {
     return (

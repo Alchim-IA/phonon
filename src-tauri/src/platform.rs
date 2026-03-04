@@ -86,9 +86,21 @@ pub fn type_text_incremental(text: &str) {
 
         std::thread::sleep(std::time::Duration::from_millis(30));
 
-        let script = r#"tell application "System Events" to keystroke "v" using command down"#;
+        // Use CGEvent API to post Cmd+V with ONLY the Command flag set,
+        // ignoring any physically held modifier keys (e.g. Ctrl+Shift during PTT).
+        let script = r#"
+ObjC.import('CoreGraphics');
+var kCGEventFlagMaskCommand = 1048576;
+var vKeyCode = 9;
+var down = $.CGEventCreateKeyboardEvent(null, vKeyCode, true);
+$.CGEventSetFlags(down, kCGEventFlagMaskCommand);
+$.CGEventPost($.kCGHIDEventTap, down);
+var up = $.CGEventCreateKeyboardEvent(null, vKeyCode, false);
+$.CGEventSetFlags(up, kCGEventFlagMaskCommand);
+$.CGEventPost($.kCGHIDEventTap, up);
+"#;
         let _ = Command::new("osascript")
-            .args(["-e", script])
+            .args(["-l", "JavaScript", "-e", script])
             .output();
     }
 
