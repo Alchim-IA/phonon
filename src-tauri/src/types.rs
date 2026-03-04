@@ -69,28 +69,25 @@ impl LocalLlmModel {
         }
     }
 
-    /// Format du prompt pour ce modèle
-    pub fn format_prompt(&self, _instruction: &str, text: &str) -> String {
+    /// Format du prompt pour ce modèle avec une instruction personnalisée
+    pub fn format_prompt(&self, instruction: &str, text: &str) -> String {
         match self {
             LocalLlmModel::SmolLM2_360M => {
-                // SmolLM2 - format ChatML simplifié
                 format!(
-                    "<|im_start|>user\nResume ce texte en 2 phrases:\n\n{}<|im_end|>\n<|im_start|>assistant\n",
-                    text
+                    "<|im_start|>user\n{}\n\n{}<|im_end|>\n<|im_start|>assistant\n",
+                    instruction, text
                 )
             }
             LocalLlmModel::Phi3Mini => {
-                // Phi-3 utilise un format spécifique
                 format!(
-                    "<|user|>\nResume ce texte en 2-3 phrases concises en francais:\n\n{}<|end|>\n<|assistant|>\n",
-                    text
+                    "<|user|>\n{}\n\n{}<|end|>\n<|assistant|>\n",
+                    instruction, text
                 )
             }
             LocalLlmModel::Qwen2_5_3B => {
-                // Qwen2.5 - format ChatML
                 format!(
-                    "<|im_start|>user\nResume ce texte en 2-3 phrases concises:\n\n{}<|im_end|>\n<|im_start|>assistant\n",
-                    text
+                    "<|im_start|>user\n{}\n\n{}<|im_end|>\n<|im_start|>assistant\n",
+                    instruction, text
                 )
             }
         }

@@ -421,34 +421,7 @@ fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
 
     let settings = storage::config::load_settings();
     let target_language = settings.translation_target_language;
-
-    let api_key = match crate::commands::llm::get_groq_api_key_internal() {
-        Some(key) => key,
-        None => {
-            log::warn!("[TRANSLATE] No Groq API key configured");
-            set_tray_state(TrayState::Idle);
-            let _ = app.emit("translation_error", "Clé API Groq non configurée");
-            let _ = app.emit("translation-status", "idle");
-            return;
-        }
-    };
-
-    let language_name = match target_language.as_str() {
-        "fr" => "French", "en" => "English", "de" => "German",
-        "es" => "Spanish", "it" => "Italian", "pt" => "Portuguese",
-        "nl" => "Dutch", "ru" => "Russian", "zh" => "Chinese",
-        "ja" => "Japanese", "ko" => "Korean", "ar" => "Arabic",
-        _ => &target_language,
-    };
-
-    let system_prompt = format!(
-        "You are a professional translator. Translate the following text to {}. \
-         Only output the translation, nothing else. Preserve the original formatting, \
-         punctuation and tone. If the text is already in {}, return it unchanged.",
-        language_name, language_name
-    );
-
-    log::info!("[TRANSLATE] Calling Groq API for translation to {}...", language_name);
+    let language_name = crate::commands::llm::resolve_language_name(&target_language).to_string();
 
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -463,16 +436,82 @@ fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
         }
     };
 
-    let translated = rt.block_on(async {
-        crate::llm::groq_client::send_completion(&api_key, &system_prompt, &clipboard_text).await
-    });
+    // Utiliser le LLM local ou Groq selon le provider configuré
+    let translated: Result<String, String> = match settings.llm_provider {
+        crate::types::LlmProvider::Local => {
+            log::info!("[TRANSLATE] Using local LLM for translation to {}...", language_name);
+            let model_manager: tauri::State<'_, std::sync::Arc<crate::engines::ModelManager>> = app.state();
+            let llm_engine: tauri::State<'_, std::sync::Arc<tokio::sync::RwLock<Option<crate::llm::LocalLlmEngine>>>> = app.state();
+
+            // Trouver un modèle disponible
+            let model_info = model_manager
+                .get_llm_model_path(settings.local_llm_model)
+                .map(|p| (p, settings.local_llm_model))
+                .or_else(|| {
+                    model_manager.available_llm_models().into_iter().find_map(|m| {
+                        model_manager.get_llm_model_path(m).map(|p| (p, m))
+                    })
+                });
+
+            match model_info {
+                Some((model_path, model_size)) => {
+                    rt.block_on(async {
+                        {
+                            let engine_read = llm_engine.read().await;
+                            let needs_reload = match engine_read.as_ref() {
+                                None => true,
+                                Some(e) => e.model_type() != model_size,
+                            };
+                            if needs_reload {
+                                drop(engine_read);
+                                let mut engine_write = llm_engine.write().await;
+                                let engine = crate::llm::LocalLlmEngine::new(&model_path, model_size)
+                                    .map_err(|e| format!("Failed to load LLM: {}", e))?;
+                                *engine_write = Some(engine);
+                            }
+                        }
+                        let engine_read = llm_engine.read().await;
+                        let engine = engine_read.as_ref().ok_or("LLM engine not initialized")?;
+                        engine.translate(&clipboard_text, &language_name)
+                    })
+                }
+                None => Err("Aucun modèle LLM local installé".to_string()),
+            }
+        }
+        crate::types::LlmProvider::Groq => {
+            let api_key = match crate::commands::llm::get_groq_api_key_internal() {
+                Some(key) => key,
+                None => {
+                    log::warn!("[TRANSLATE] No Groq API key configured");
+                    set_tray_state(TrayState::Idle);
+                    let _ = app.emit("translation_error", "Clé API Groq non configurée");
+                    let _ = app.emit("translation-status", "idle");
+                    return;
+                }
+            };
+
+            let system_prompt = format!(
+                "You are a professional translator. Translate the following text to {}. \
+                 Only output the translation, nothing else. Preserve the original formatting, \
+                 punctuation and tone. If the text is already in {}, return it unchanged.",
+                language_name, language_name
+            );
+
+            log::info!("[TRANSLATE] Calling Groq API for translation to {}...", language_name);
+
+            rt.block_on(async {
+                crate::llm::groq_client::send_completion(&api_key, &system_prompt, &clipboard_text).await
+                    .map(|t| t.trim().to_string())
+                    .map_err(|e| format!("Translation failed: {}", e))
+            })
+        }
+    };
 
     match translated {
         Ok(text) => {
-            let trimmed = text.trim().to_string();
             log::info!("[TRANSLATE] Translation successful");
-            paste_text(&trimmed);
-            let _ = app.emit("translation_complete", &trimmed);
+            paste_text(&text);
+            let _ = app.emit("translation_complete", &text);
         }
         Err(e) => {
             log::error!("[TRANSLATE] Translation failed: {}", e);

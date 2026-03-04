@@ -179,13 +179,8 @@ comme si tu racontais à quelqu'un qui n'a pas écouté l'audio.
     }
 }
 
-/// Traduit un texte vers une langue cible via Groq
-#[tauri::command]
-pub async fn translate_text(text: String, target_language: String) -> Result<String, String> {
-    let api_key = get_groq_api_key_internal()
-        .ok_or_else(|| "No Groq API key configured".to_string())?;
-
-    let language_name = match target_language.as_str() {
+pub fn resolve_language_name(code: &str) -> &str {
+    match code {
         "fr" => "French",
         "en" => "English",
         "de" => "German",
@@ -198,8 +193,17 @@ pub async fn translate_text(text: String, target_language: String) -> Result<Str
         "ja" => "Japanese",
         "ko" => "Korean",
         "ar" => "Arabic",
-        _ => &target_language,
-    };
+        other => other,
+    }
+}
+
+/// Traduit un texte vers une langue cible via Groq
+#[tauri::command]
+pub async fn translate_text(text: String, target_language: String) -> Result<String, String> {
+    let api_key = get_groq_api_key_internal()
+        .ok_or_else(|| "No Groq API key configured".to_string())?;
+
+    let language_name = resolve_language_name(&target_language);
 
     let system_prompt = format!(
         "You are a professional translator. Translate the following text to {}. \
@@ -216,6 +220,74 @@ pub async fn translate_text(text: String, target_language: String) -> Result<Str
         Err(e) => {
             log::error!("Translation failed: {}", e);
             Err(format!("Translation failed: {}", e))
+        }
+    }
+}
+
+/// Traduit un texte avec le LLM local
+#[tauri::command]
+pub async fn translate_text_local(
+    model_manager: State<'_, Arc<ModelManager>>,
+    llm_engine: State<'_, Arc<RwLock<Option<LocalLlmEngine>>>>,
+    text: String,
+    target_language: String,
+) -> Result<String, String> {
+    let settings = config::load_settings();
+    let language_name = resolve_language_name(&target_language);
+
+    let (model_path, model_size) = model_manager
+        .get_llm_model_path(settings.local_llm_model)
+        .map(|p| (p, settings.local_llm_model))
+        .or_else(|| {
+            model_manager.available_llm_models().into_iter().find_map(|m| {
+                model_manager.get_llm_model_path(m).map(|p| (p, m))
+            })
+        })
+        .ok_or_else(|| "Aucun modèle LLM local installé. Téléchargez-en un dans les paramètres.".to_string())?;
+
+    {
+        let engine_read = llm_engine.read().await;
+        let needs_reload = match engine_read.as_ref() {
+            None => true,
+            Some(engine) => engine.model_type() != model_size,
+        };
+        if needs_reload {
+            drop(engine_read);
+            let mut engine_write = llm_engine.write().await;
+            log::info!("Initializing Local LLM engine with {:?}...", model_size);
+            let engine = LocalLlmEngine::new(&model_path, model_size)?;
+            *engine_write = Some(engine);
+        }
+    }
+
+    let engine_read = llm_engine.read().await;
+    let engine = engine_read.as_ref().ok_or("LLM engine not initialized")?;
+
+    log::info!("Translating {} chars to {} with local LLM", text.len(), language_name);
+    let translated = engine.translate(&text, language_name)?;
+    log::info!("Local translation complete: {} chars", translated.len());
+
+    Ok(translated)
+}
+
+/// Traduit un texte avec le provider configuré (auto-sélection local/cloud)
+#[tauri::command]
+pub async fn translate_text_smart(
+    model_manager: State<'_, Arc<ModelManager>>,
+    llm_engine: State<'_, Arc<RwLock<Option<LocalLlmEngine>>>>,
+    text: String,
+    target_language: String,
+    provider: Option<LlmProvider>,
+) -> Result<String, String> {
+    let settings = config::load_settings();
+    let use_provider = provider.unwrap_or(settings.llm_provider);
+
+    match use_provider {
+        LlmProvider::Local => {
+            translate_text_local(model_manager, llm_engine, text, target_language).await
+        }
+        LlmProvider::Groq => {
+            translate_text(text, target_language).await
         }
     }
 }

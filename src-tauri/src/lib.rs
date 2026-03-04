@@ -76,6 +76,8 @@ pub fn run() {
             commands::delete_groq_api_key,
             commands::get_groq_quota,
             commands::translate_text,
+            commands::translate_text_local,
+            commands::translate_text_smart,
             commands::summarize_text,
             commands::is_llm_model_available,
             commands::get_available_llm_models,

@@ -49,7 +49,23 @@ impl LocalLlmEngine {
 
     /// Generates a summary of the given text
     pub fn summarize(&self, text: &str) -> Result<String, String> {
-        let prompt = self.model_type.format_prompt("", text);
+        let instruction = "Resume ce texte en 2-3 phrases concises en francais:";
+        self.generate(instruction, text)
+    }
+
+    /// Translates text to the target language
+    pub fn translate(&self, text: &str, target_language: &str) -> Result<String, String> {
+        let instruction = format!(
+            "Translate the following text to {}. Only output the translation, nothing else. \
+             Preserve the original formatting, punctuation and tone.",
+            target_language
+        );
+        self.generate(&instruction, text)
+    }
+
+    /// Core generation method
+    fn generate(&self, instruction: &str, text: &str) -> Result<String, String> {
+        let prompt = self.model_type.format_prompt(instruction, text);
 
         // Create a fresh context for this inference
         let ctx_params = LlamaContextParams::default()
