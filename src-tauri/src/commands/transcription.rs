@@ -7,6 +7,7 @@ use crate::state::AppState;
 use crate::storage::history;
 use crate::types::TranscriptionResult;
 use crate::audio::AudioCapture;
+use crate::audio::AudioProcessor;
 use crate::voice_commands;
 use crate::llm;
 
@@ -179,6 +180,11 @@ pub fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<(),
         }
     }
 
+    // Reset audio processor for new recording
+    if let Ok(mut processor) = state.audio_processor.write() {
+        processor.reset();
+    }
+
     *is_recording = true;
     STREAMING_ACTIVE.store(streaming_enabled, Ordering::SeqCst);
 
@@ -189,8 +195,9 @@ pub fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<(),
     if streaming_enabled {
         let app_clone = app.clone();
         let engine_clone = state.engine.clone();
+        let processor_clone = state.audio_processor.clone();
         std::thread::spawn(move || {
-            run_streaming_task(app_clone, engine_clone);
+            run_streaming_task(app_clone, engine_clone, processor_clone);
         });
     }
 
@@ -199,7 +206,11 @@ pub fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<(),
 }
 
 /// Tâche de streaming qui transcrit l'audio en temps réel
-fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEngine>>>>) {
+fn run_streaming_task(
+    app: AppHandle,
+    state: Arc<RwLock<Option<Box<dyn SpeechEngine>>>>,
+    processor: Arc<RwLock<AudioProcessor>>,
+) {
     log::info!("Streaming task started with real-time transcription");
 
     let start_time = std::time::Instant::now();
@@ -242,12 +253,32 @@ fn run_streaming_task(app: AppHandle, state: Arc<RwLock<Option<Box<dyn SpeechEng
                 // Transcribe the new segment (from last_processed to current)
                 let chunk_audio = &audio[last_processed_samples..current_samples];
 
-                // Resampling si nécessaire
-                let resampled = if sample_rate != TARGET_SAMPLE_RATE {
-                    resample_audio(chunk_audio, sample_rate, TARGET_SAMPLE_RATE)
+                // Audio processing: pre-resample (noise suppression)
+                let chunk_processed = if let Ok(mut proc) = processor.write() {
+                    proc.process_pre_resample(chunk_audio, sample_rate)
                 } else {
                     chunk_audio.to_vec()
                 };
+
+                // Resampling si nécessaire
+                let resampled = if sample_rate != TARGET_SAMPLE_RATE {
+                    resample_audio(&chunk_processed, sample_rate, TARGET_SAMPLE_RATE)
+                } else {
+                    chunk_processed
+                };
+
+                // Audio processing: post-resample (limiter + AGC + VAD)
+                let (resampled, has_speech) = if let Ok(mut proc) = processor.write() {
+                    proc.process_post_resample(&resampled)
+                } else {
+                    (resampled, true)
+                };
+
+                if !has_speech {
+                    log::debug!("Streaming chunk: no speech detected, skipping");
+                    last_processed_samples = current_samples;
+                    continue;
+                }
 
                 // Transcrire le chunk
                 if let Ok(engine_guard) = state.read() {
@@ -337,6 +368,12 @@ pub async fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> Resul
     let audio_buffer = audio_result.audio;
     let sample_rate = audio_result.sample_rate;
 
+    // Audio processing: pre-resample (noise suppression)
+    let audio_buffer = {
+        let mut processor = state.audio_processor.write().map_err(|e| e.to_string())?;
+        processor.process_pre_resample(&audio_buffer, sample_rate)
+    };
+
     if audio_buffer.is_empty() {
         emit_recording_status(&app, "idle");
         return Err("No audio captured".to_string());
@@ -358,6 +395,18 @@ pub async fn stop_recording(app: AppHandle, state: State<'_, AppState>) -> Resul
     } else {
         audio_buffer
     };
+
+    // Audio processing: post-resample (limiter + AGC + VAD)
+    let (resampled_audio, has_speech) = {
+        let mut processor = state.audio_processor.write().map_err(|e| e.to_string())?;
+        processor.process_post_resample(&resampled_audio)
+    };
+
+    if !has_speech {
+        log::info!("VAD: no speech detected, skipping transcription");
+        emit_recording_status(&app, "idle");
+        return Err("No speech detected in recording".to_string());
+    }
 
     // Transcription
     let result = {
