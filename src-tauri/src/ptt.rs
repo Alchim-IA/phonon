@@ -166,11 +166,37 @@ fn start_streaming_transcription(app: &tauri::AppHandle) {
             continue;
         }
 
+        // Audio processing: pre-resample
+        let audio_data = {
+            let state: tauri::State<'_, AppState> = app.state();
+            let result = if let Ok(mut proc) = state.audio_processor.write() {
+                proc.process_pre_resample(&audio_data, sample_rate)
+            } else {
+                audio_data
+            };
+            result
+        };
+
         let resampled = if sample_rate != TARGET_SAMPLE_RATE {
             crate::audio::resampling::resample_audio(&audio_data, sample_rate, TARGET_SAMPLE_RATE)
         } else {
             audio_data
         };
+
+        // Audio processing: post-resample
+        let (resampled, has_speech) = {
+            let state: tauri::State<'_, AppState> = app.state();
+            let result = if let Ok(mut proc) = state.audio_processor.write() {
+                proc.process_post_resample(&resampled)
+            } else {
+                (resampled, true)
+            };
+            result
+        };
+
+        if !has_speech {
+            continue;
+        }
 
         let state: tauri::State<'_, AppState> = app.state();
         let engine_guard = match state.engine.read() {
@@ -272,11 +298,39 @@ fn stop_ptt_and_paste(app: &tauri::AppHandle) {
         return;
     }
 
+    // Reset and apply audio processing: pre-resample (noise suppression)
+    let audio_data = {
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = if let Ok(mut processor) = state.audio_processor.write() {
+            processor.reset();
+            processor.process_pre_resample(&audio_data, sample_rate)
+        } else {
+            audio_data
+        };
+        result
+    };
+
     let resampled_audio = if sample_rate != TARGET_SAMPLE_RATE {
         crate::audio::resampling::resample_audio(&audio_data, sample_rate, TARGET_SAMPLE_RATE)
     } else {
         audio_data
     };
+
+    // Audio processing: post-resample (limiter + AGC + VAD)
+    let (resampled_audio, has_speech) = {
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = if let Ok(mut processor) = state.audio_processor.write() {
+            processor.process_post_resample(&resampled_audio)
+        } else {
+            (resampled_audio, true)
+        };
+        result
+    };
+
+    if !has_speech {
+        log::info!("PTT: no speech detected, skipping");
+        return;
+    }
 
     let state: tauri::State<'_, AppState> = app.state();
     let engine_guard = match state.engine.read() {
@@ -516,11 +570,41 @@ fn stop_voice_action_and_execute(app: &tauri::AppHandle) {
         return;
     }
 
+    // Audio processing: pre-resample (noise suppression)
+    let audio_data = {
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = if let Ok(mut processor) = state.audio_processor.write() {
+            processor.reset();
+            processor.process_pre_resample(&audio_data, sample_rate)
+        } else {
+            audio_data
+        };
+        result
+    };
+
     let resampled = if sample_rate != TARGET_SAMPLE_RATE {
         crate::audio::resampling::resample_audio(&audio_data, sample_rate, TARGET_SAMPLE_RATE)
     } else {
         audio_data
     };
+
+    // Audio processing: post-resample (limiter + AGC + VAD)
+    let (resampled, has_speech) = {
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = if let Ok(mut processor) = state.audio_processor.write() {
+            processor.process_post_resample(&resampled)
+        } else {
+            (resampled, true)
+        };
+        result
+    };
+
+    if !has_speech {
+        log::info!("[VOICE_ACTION] No speech detected, skipping");
+        set_tray_state(TrayState::Idle);
+        let _ = app.emit("voice-action-status", "idle");
+        return;
+    }
 
     let state: tauri::State<'_, crate::state::AppState> = app.state();
     let engine_guard = match state.engine.read() {
@@ -683,6 +767,19 @@ pub fn handle_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut, event: &taur
                     }
                     set_tray_recording(true);
                     start_ptt_recording();
+                    // Show floating window centered at top of screen during PTT
+                    if let Some(window) = app.get_webview_window("floating") {
+                        if let Ok(Some(monitor)) = window.primary_monitor() {
+                            let screen_width = monitor.size().width as i32;
+                            let window_width = 380; // matches tauri.conf.json
+                            let x = (screen_width - window_width) / 2;
+                            let y = 40; // slight offset from top
+                            let _ = window.set_position(tauri::Position::Physical(
+                                tauri::PhysicalPosition { x, y },
+                            ));
+                        }
+                        let _ = window.show();
+                    }
                     let _ = app.emit("recording-status", "recording");
 
                     let handle = app.clone();
@@ -699,6 +796,11 @@ pub fn handle_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut, event: &taur
                     std::thread::spawn(move || {
                         stop_ptt_and_paste(&handle);
                         let _ = handle.emit("recording-status", "idle");
+                        // Hide floating window after a delay
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        if let Some(window) = handle.get_webview_window("floating") {
+                            let _ = window.hide();
+                        }
                     });
                 }
             }
