@@ -9,6 +9,7 @@ interface SummaryState {
     loading: boolean;
     text: string | null;
     error: string | null;
+    durationMs: number | null;
   };
 }
 
@@ -40,19 +41,21 @@ export function TranscriptionHistory() {
   const handleSummarize = useCallback(async (index: number, text: string, provider?: LlmProvider) => {
     setSummaries(prev => ({
       ...prev,
-      [index]: { loading: true, text: null, error: null }
+      [index]: { loading: true, text: null, error: null, durationMs: null }
     }));
 
+    const start = performance.now();
     try {
       const summary = await invoke<string>('summarize_text_smart', { text, provider });
+      const durationMs = Math.round(performance.now() - start);
       setSummaries(prev => ({
         ...prev,
-        [index]: { loading: false, text: summary, error: null }
+        [index]: { loading: false, text: summary, error: null, durationMs }
       }));
     } catch (e) {
       setSummaries(prev => ({
         ...prev,
-        [index]: { loading: false, text: null, error: String(e) }
+        [index]: { loading: false, text: null, error: String(e), durationMs: null }
       }));
     }
   }, []);
@@ -257,6 +260,13 @@ export function TranscriptionHistory() {
                         <line x1="16" y1="17" x2="8" y2="17" />
                       </svg>
                       <span className="text-[0.7rem] font-medium text-[var(--accent-primary)]">Resume</span>
+                      {summaries[index].durationMs != null && (
+                        <span className="text-[0.6rem] text-[var(--text-muted)] tabular-nums">
+                          {summaries[index].durationMs! >= 1000
+                            ? `${(summaries[index].durationMs! / 1000).toFixed(1)}s`
+                            : `${summaries[index].durationMs}ms`}
+                        </span>
+                      )}
                     </div>
                     <button
                       onClick={() => handleCopySummary(summaries[index].text!)}
