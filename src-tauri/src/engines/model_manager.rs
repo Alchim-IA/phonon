@@ -364,7 +364,7 @@ impl ModelManager {
 
     /// List available LLM models
     pub fn available_llm_models(&self) -> Vec<LocalLlmModel> {
-        [LocalLlmModel::SmolLM2_360M, LocalLlmModel::Phi3Mini, LocalLlmModel::Qwen2_5_3B]
+        [LocalLlmModel::SmolLM2_360M, LocalLlmModel::Qwen2_5_1_5B, LocalLlmModel::Phi3Mini, LocalLlmModel::Qwen2_5_3B]
             .into_iter()
             .filter(|&size| self.is_llm_model_available(size))
             .collect()
