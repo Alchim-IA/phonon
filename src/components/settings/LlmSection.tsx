@@ -277,15 +277,17 @@ export function LlmSection({ settings, updateSettings, onApiKeyStatusChange }: L
                 <div>
                   <label className="text-[0.8rem] text-[var(--text-muted)] mb-3 block">Modele LLM Local</label>
                   <div className="space-y-2">
-                    {(['smollm2_360m', 'phi3_mini', 'qwen2_5_3b'] as LocalLlmModel[]).map((size) => {
+                    {(['smollm2_360m', 'qwen2_5_1_5b', 'phi3_mini', 'qwen2_5_3b'] as LocalLlmModel[]).map((size) => {
                       const isAvailable = llmModelsAvailable.includes(size);
                       const isDownloading = downloadingLlm === size;
                       const isSelected = settings.local_llm_model === size;
-                      const displayName = size === 'smollm2_360m'
-                        ? 'SmolLM2 360M (386 MB) - Rapide'
-                        : size === 'phi3_mini'
-                        ? 'Phi-3 Mini (2.2 GB) - Recommande'
-                        : 'Qwen2.5 3B (2 GB) - Qualite';
+                      const displayNames: Record<LocalLlmModel, string> = {
+                        smollm2_360m: 'SmolLM2 360M (386 MB) - Rapide',
+                        qwen2_5_1_5b: 'Qwen2.5 1.5B (1.1 GB) - Recommande',
+                        phi3_mini: 'Phi-3 Mini (2.2 GB) - Qualite',
+                        qwen2_5_3b: 'Qwen2.5 3B (2 GB) - Qualite+',
+                      };
+                      const displayName = displayNames[size];
 
                       return (
                         <div

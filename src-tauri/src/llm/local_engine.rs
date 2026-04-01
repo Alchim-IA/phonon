@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -10,9 +11,18 @@ use llama_cpp_2::sampling::LlamaSampler;
 
 use crate::types::LocalLlmModel;
 
+/// Global singleton backend — LlamaBackend::init() can only succeed once per process.
+/// Storing it here prevents the Drop from freeing the backend when a LocalLlmEngine is replaced.
+static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
+
+fn get_backend() -> &'static LlamaBackend {
+    LLAMA_BACKEND.get_or_init(|| {
+        LlamaBackend::init().expect("Failed to initialize llama backend")
+    })
+}
+
 /// Moteur LLM local via llama.cpp (GGUF)
 pub struct LocalLlmEngine {
-    backend: LlamaBackend,
     model: LlamaModel,
     model_type: LocalLlmModel,
 }
@@ -25,13 +35,17 @@ impl LocalLlmEngine {
             model_path
         );
 
-        let backend = LlamaBackend::init()
-            .map_err(|e| format!("Failed to initialize llama backend: {}", e))?;
+        let backend = get_backend();
 
+        // On Apple Silicon (M1+), offload all layers to GPU for best performance.
+        // On Intel Macs (AMD GPU), use CPU-only: Metal shader compilation is slow
+        // and GPU inference is unreliable on these machines.
+        let gpu_layers = if Self::is_apple_silicon() { 1000 } else { 0 };
+        log::info!("Using {} GPU layers (Apple Silicon: {})", gpu_layers, Self::is_apple_silicon());
         let model_params = LlamaModelParams::default()
-            .with_n_gpu_layers(1000); // Offload all layers to GPU (Metal on macOS)
+            .with_n_gpu_layers(gpu_layers);
 
-        let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
+        let model = LlamaModel::load_from_file(backend, model_path, &model_params)
             .map_err(|e| format!("Failed to load model from {:?}: {}", model_path, e))?;
 
         log::info!(
@@ -41,7 +55,6 @@ impl LocalLlmEngine {
         );
 
         Ok(Self {
-            backend,
             model,
             model_type,
         })
@@ -65,6 +78,7 @@ impl LocalLlmEngine {
 
     /// Core generation method
     fn generate(&self, instruction: &str, text: &str) -> Result<String, String> {
+        let backend = get_backend();
         let prompt = self.model_type.format_prompt(instruction, text);
 
         // Create a fresh context for this inference
@@ -73,7 +87,7 @@ impl LocalLlmEngine {
 
         let mut ctx = self
             .model
-            .new_context(&self.backend, ctx_params)
+            .new_context(backend, ctx_params)
             .map_err(|e| format!("Failed to create inference context: {}", e))?;
 
         // Tokenize the prompt
@@ -103,8 +117,14 @@ impl LocalLlmEngine {
         ctx.decode(&mut batch)
             .map_err(|e| format!("Failed to decode prompt: {}", e))?;
 
-        // Set up sampling: temperature 0.3 for focused output
+        // Set up sampling: temperature 0.3 for focused output, with repetition penalty
         let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::penalties(
+                64,   // penalty_last_n: look back 64 tokens
+                1.3,  // penalty_repeat: penalize repeated tokens
+                0.0,  // penalty_freq
+                0.0,  // penalty_present
+            ),
             LlamaSampler::temp(0.3),
             LlamaSampler::dist(42),
         ]);
@@ -130,6 +150,19 @@ impl LocalLlmEngine {
             match self.model.token_to_piece(new_token, &mut decoder, true, None) {
                 Ok(piece) => output.push_str(&piece),
                 Err(_) => {} // Skip invalid tokens
+            }
+
+            // Break on repetition loop: check for repeated short patterns
+            if output.len() > 30 {
+                let check_len = 20.min(output.len() / 2);
+                let tail = &output[output.len() - check_len * 2..];
+                let half = &tail[..check_len];
+                let other_half = &tail[check_len..];
+                if half == other_half {
+                    log::warn!("Repetition loop detected, stopping generation");
+                    output.truncate(output.len() - check_len * 2);
+                    break;
+                }
             }
 
             // Prepare next iteration
@@ -158,6 +191,11 @@ impl LocalLlmEngine {
 
     pub fn display_name(&self) -> String {
         format!("Local LLM ({})", self.model_type.display_name())
+    }
+
+    /// Detect Apple Silicon (aarch64 macOS) vs Intel Mac
+    fn is_apple_silicon() -> bool {
+        cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
     }
 }
 

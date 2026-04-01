@@ -21,6 +21,7 @@ static VOICE_ACTION_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
 
 // État global pour le push-to-talk
 static IS_PTT_ACTIVE: AtomicBool = AtomicBool::new(false);
+static IS_TRANSLATE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static IS_VOICE_ACTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SELECTED_TEXT_FOR_ACTION: Mutex<String> = Mutex::new(String::new());
 
@@ -846,10 +847,15 @@ pub fn handle_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut, event: &taur
         }
     } else if is_translate {
         if let ShortcutState::Released = event.state() {
-            let handle = app.clone();
-            std::thread::spawn(move || {
-                translate_clipboard_and_paste(&handle);
-            });
+            if !IS_TRANSLATE_ACTIVE.swap(true, Ordering::SeqCst) {
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    translate_clipboard_and_paste(&handle);
+                    IS_TRANSLATE_ACTIVE.store(false, Ordering::SeqCst);
+                });
+            } else {
+                log::warn!("[TRANSLATE] Translation already in progress, ignoring");
+            }
         }
     } else if is_voice_action {
         match event.state() {

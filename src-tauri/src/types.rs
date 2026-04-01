@@ -30,8 +30,10 @@ pub enum LocalLlmModel {
     #[serde(rename = "smollm2_360m")]
     SmolLM2_360M,    // ~386 MB - Ultra rapide, résumés basiques
     #[default]
+    #[serde(rename = "qwen2_5_1_5b")]
+    Qwen2_5_1_5B,   // ~1.1 GB - Rapide et capable (recommandé)
     #[serde(rename = "phi3_mini")]
-    Phi3Mini,        // ~2.2 GB - Excellent rapport qualité/taille (recommandé)
+    Phi3Mini,        // ~2.2 GB - Excellent rapport qualité/taille
     #[serde(rename = "qwen2_5_3b")]
     Qwen2_5_3B,      // ~2.0 GB - Très bonne qualité
 }
@@ -40,6 +42,7 @@ impl LocalLlmModel {
     pub fn file_name(&self) -> &'static str {
         match self {
             LocalLlmModel::SmolLM2_360M => "SmolLM2-360M-Instruct-Q8_0.gguf",
+            LocalLlmModel::Qwen2_5_1_5B => "qwen2.5-1.5b-instruct-q4_k_m.gguf",
             LocalLlmModel::Phi3Mini => "Phi-3-mini-4k-instruct-Q4_K_M.gguf",
             LocalLlmModel::Qwen2_5_3B => "qwen2.5-3b-instruct-q4_k_m.gguf",
         }
@@ -48,6 +51,7 @@ impl LocalLlmModel {
     pub fn download_url(&self) -> &'static str {
         match self {
             LocalLlmModel::SmolLM2_360M => "https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q8_0.gguf",
+            LocalLlmModel::Qwen2_5_1_5B => "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
             LocalLlmModel::Phi3Mini => "https://huggingface.co/bartowski/Phi-3-mini-4k-instruct-GGUF/resolve/main/Phi-3-mini-4k-instruct-Q4_K_M.gguf",
             LocalLlmModel::Qwen2_5_3B => "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
         }
@@ -56,6 +60,7 @@ impl LocalLlmModel {
     pub fn size_bytes(&self) -> u64 {
         match self {
             LocalLlmModel::SmolLM2_360M => 386_000_000,    // ~386 MB
+            LocalLlmModel::Qwen2_5_1_5B => 1_100_000_000,  // ~1.1 GB
             LocalLlmModel::Phi3Mini => 2_200_000_000,      // ~2.2 GB
             LocalLlmModel::Qwen2_5_3B => 2_000_000_000,    // ~2.0 GB
         }
@@ -64,15 +69,16 @@ impl LocalLlmModel {
     pub fn display_name(&self) -> &'static str {
         match self {
             LocalLlmModel::SmolLM2_360M => "SmolLM2 360M (386 MB) - Rapide",
-            LocalLlmModel::Phi3Mini => "Phi-3 Mini (2.2 GB) - Recommandé",
-            LocalLlmModel::Qwen2_5_3B => "Qwen2.5 3B (2 GB) - Qualité",
+            LocalLlmModel::Qwen2_5_1_5B => "Qwen2.5 1.5B (1.1 GB) - Recommandé",
+            LocalLlmModel::Phi3Mini => "Phi-3 Mini (2.2 GB) - Qualité",
+            LocalLlmModel::Qwen2_5_3B => "Qwen2.5 3B (2 GB) - Qualité+",
         }
     }
 
     /// Format du prompt pour ce modèle avec une instruction personnalisée
     pub fn format_prompt(&self, instruction: &str, text: &str) -> String {
         match self {
-            LocalLlmModel::SmolLM2_360M => {
+            LocalLlmModel::SmolLM2_360M | LocalLlmModel::Qwen2_5_1_5B | LocalLlmModel::Qwen2_5_3B => {
                 format!(
                     "<|im_start|>user\n{}\n\n{}<|im_end|>\n<|im_start|>assistant\n",
                     instruction, text
@@ -81,12 +87,6 @@ impl LocalLlmModel {
             LocalLlmModel::Phi3Mini => {
                 format!(
                     "<|user|>\n{}\n\n{}<|end|>\n<|assistant|>\n",
-                    instruction, text
-                )
-            }
-            LocalLlmModel::Qwen2_5_3B => {
-                format!(
-                    "<|im_start|>user\n{}\n\n{}<|im_end|>\n<|im_start|>assistant\n",
                     instruction, text
                 )
             }

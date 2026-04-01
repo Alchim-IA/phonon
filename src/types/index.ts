@@ -27,7 +27,7 @@ export type LlmMode = 'off' | 'basic' | 'smart' | 'contextual';
 
 export type LlmProvider = 'groq' | 'local';
 
-export type LocalLlmModel = 'smollm2_360m' | 'phi3_mini' | 'qwen2_5_3b';
+export type LocalLlmModel = 'smollm2_360m' | 'qwen2_5_1_5b' | 'phi3_mini' | 'qwen2_5_3b';
 
 export interface LocalLlmModelInfo {
   size: LocalLlmModel;
