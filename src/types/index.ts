@@ -167,3 +167,21 @@ export interface LlmDownloadProgress {
   total: number;
   progress: number;
 }
+
+export interface TranslationEntry {
+  source_text: string;
+  translated_text: string;
+  source_language: string | null;
+  target_language: string;
+  char_count: number;
+  translation_time_ms: number;
+  provider: string;
+  timestamp: number;
+}
+
+export interface LogEntry {
+  timestamp: number;
+  level: string;
+  category: string;
+  message: string;
+}

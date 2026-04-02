@@ -6,6 +6,7 @@ use std::time::Duration;
 const GROQ_API_ENDPOINT: &str = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODEL: &str = "llama-3.3-70b-versatile";
 const TIMEOUT_SECONDS: u64 = 30;
+const TIMEOUT_FAST_SECONDS: u64 = 8;
 
 /// Informations de quota Groq (mises à jour après chaque requête)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -117,8 +118,25 @@ pub async fn send_completion(
     system_prompt: &str,
     text: &str,
 ) -> Result<String, GroqError> {
+    send_completion_with_timeout(api_key, system_prompt, text, TIMEOUT_SECONDS).await
+}
+
+pub async fn send_completion_fast(
+    api_key: &str,
+    system_prompt: &str,
+    text: &str,
+) -> Result<String, GroqError> {
+    send_completion_with_timeout(api_key, system_prompt, text, TIMEOUT_FAST_SECONDS).await
+}
+
+async fn send_completion_with_timeout(
+    api_key: &str,
+    system_prompt: &str,
+    text: &str,
+    timeout_secs: u64,
+) -> Result<String, GroqError> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(TIMEOUT_SECONDS))
+        .timeout(Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| GroqError::NetworkError(e.to_string()))?;
 

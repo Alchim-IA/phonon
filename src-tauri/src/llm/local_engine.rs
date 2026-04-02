@@ -12,13 +12,20 @@ use llama_cpp_2::sampling::LlamaSampler;
 use crate::types::LocalLlmModel;
 
 /// Global singleton backend — LlamaBackend::init() can only succeed once per process.
-/// Storing it here prevents the Drop from freeing the backend when a LocalLlmEngine is replaced.
 static LLAMA_BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
 
 fn get_backend() -> &'static LlamaBackend {
     LLAMA_BACKEND.get_or_init(|| {
         LlamaBackend::init().expect("Failed to initialize llama backend")
     })
+}
+
+/// Number of physical CPU cores (for optimal thread count)
+fn physical_cores() -> i32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as i32 / 2) // available_parallelism returns logical cores
+        .unwrap_or(4)
+        .max(1)
 }
 
 /// Moteur LLM local via llama.cpp (GGUF)
@@ -37,11 +44,9 @@ impl LocalLlmEngine {
 
         let backend = get_backend();
 
-        // On Apple Silicon (M1+), offload all layers to GPU for best performance.
-        // On Intel Macs (AMD GPU), use CPU-only: Metal shader compilation is slow
-        // and GPU inference is unreliable on these machines.
+        // Apple Silicon: GPU offload. Intel Mac: CPU-only (Metal too slow on AMD GPU).
         let gpu_layers = if Self::is_apple_silicon() { 1000 } else { 0 };
-        log::info!("Using {} GPU layers (Apple Silicon: {})", gpu_layers, Self::is_apple_silicon());
+        log::info!("GPU layers: {} (Apple Silicon: {})", gpu_layers, Self::is_apple_silicon());
         let model_params = LlamaModelParams::default()
             .with_n_gpu_layers(gpu_layers);
 
@@ -49,48 +54,37 @@ impl LocalLlmEngine {
             .map_err(|e| format!("Failed to load model from {:?}: {}", model_path, e))?;
 
         log::info!(
-            "Local LLM loaded: {} params, vocab size {}",
+            "Local LLM loaded: {} params, vocab size {}, {} physical cores",
             model.n_params(),
-            model.n_vocab()
+            model.n_vocab(),
+            physical_cores()
         );
 
-        Ok(Self {
-            model,
-            model_type,
-        })
+        Ok(Self { model, model_type })
     }
 
-    /// Generates a summary of the given text
     pub fn summarize(&self, text: &str) -> Result<String, String> {
-        let instruction = "Resume ce texte en 2-3 phrases concises en francais:";
-        self.generate(instruction, text)
+        // Short prompt for speed
+        self.generate("Resume en 2-3 phrases concises en francais:", text, 256)
     }
 
-    /// Translates text to the target language
     pub fn translate(&self, text: &str, target_language: &str) -> Result<String, String> {
-        let instruction = format!(
-            "Translate the following text to {}. Only output the translation, nothing else. \
-             Preserve the original formatting, punctuation and tone.",
-            target_language
-        );
-        self.generate(&instruction, text)
+        let instruction = format!("Translate to {}:", target_language);
+
+        // Single pass — creating multiple contexts is more expensive than a larger context
+        let input_tokens = text.len() / 4;
+        let max_tokens = ((input_tokens as f32 * 1.3) as usize).clamp(32, 1024);
+        self.generate(&instruction, text, max_tokens)
     }
 
-    /// Core generation method
-    fn generate(&self, instruction: &str, text: &str) -> Result<String, String> {
+    fn generate(&self, instruction: &str, text: &str, max_output_tokens: usize) -> Result<String, String> {
+        let gen_start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+
         let backend = get_backend();
         let prompt = self.model_type.format_prompt(instruction, text);
 
-        // Create a fresh context for this inference
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(Some(NonZeroU32::new(2048).unwrap()));
-
-        let mut ctx = self
-            .model
-            .new_context(backend, ctx_params)
-            .map_err(|e| format!("Failed to create inference context: {}", e))?;
-
-        // Tokenize the prompt
+        // Tokenize first to know exact prompt size
         let tokens = self
             .model
             .str_to_token(&prompt, AddBos::Always)
@@ -100,72 +94,86 @@ impl LocalLlmEngine {
             return Err("Prompt tokenized to zero tokens".to_string());
         }
 
-        log::info!("Prompt tokenized to {} tokens", tokens.len());
+        let n_prompt = tokens.len();
+        // Context = prompt + output, no waste
+        let n_ctx = (n_prompt + max_output_tokens + 16) as u32;
+        let cores = physical_cores();
 
-        // Create batch large enough for the prompt
-        let batch_capacity = (tokens.len() + 1).max(512);
-        let mut batch = LlamaBatch::new(batch_capacity, 1);
+        log::info!(
+            "Generating: {} prompt tokens, max {} output tokens, ctx={}, threads={}",
+            n_prompt, max_output_tokens, n_ctx, cores
+        );
 
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(NonZeroU32::new(n_ctx).unwrap()))
+            .with_n_batch(n_prompt as u32)       // Process entire prompt in one batch
+            .with_n_threads(cores)                // Optimal thread count for generation
+            .with_n_threads_batch(cores * 2)      // More threads for prompt processing
+            ;
+
+        let mut ctx = self
+            .model
+            .new_context(backend, ctx_params)
+            .map_err(|e| format!("Failed to create inference context: {}", e))?;
+
+        // Feed entire prompt in one batch
+        let mut batch = LlamaBatch::new(n_prompt + 1, 1);
         for (i, token) in tokens.iter().enumerate() {
-            let is_last = i == tokens.len() - 1;
             batch
-                .add(*token, i as i32, &[0], is_last)
+                .add(*token, i as i32, &[0], i == n_prompt - 1)
                 .map_err(|e| format!("Failed to add token to batch: {}", e))?;
         }
 
-        // Evaluate the prompt
         ctx.decode(&mut batch)
             .map_err(|e| format!("Failed to decode prompt: {}", e))?;
 
-        // Set up sampling: temperature 0.3 for focused output, with repetition penalty
+        // Greedy sampling with light repetition penalty — fastest possible
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::penalties(
-                64,   // penalty_last_n: look back 64 tokens
-                1.3,  // penalty_repeat: penalize repeated tokens
-                0.0,  // penalty_freq
-                0.0,  // penalty_present
-            ),
-            LlamaSampler::temp(0.3),
-            LlamaSampler::dist(42),
+            LlamaSampler::penalties(32, 1.2, 0.0, 0.0),
+            LlamaSampler::greedy(),
         ]);
 
-        // UTF-8 decoder for token-to-text conversion
         let mut decoder = encoding_rs::UTF_8.new_decoder();
-
-        // Generate up to 512 output tokens
-        let max_output_tokens = 512;
         let mut output = String::new();
-        let mut n_cur = tokens.len() as i32;
+        let mut n_cur = n_prompt as i32;
 
         for _ in 0..max_output_tokens {
+            // Timeout check — stop if we've spent too long
+            if gen_start.elapsed() > timeout {
+                log::warn!("Generation timeout reached ({:.1}s), returning partial result", gen_start.elapsed().as_secs_f32());
+                break;
+            }
+
             let new_token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(new_token);
 
-            // Stop at end-of-generation
             if self.model.is_eog_token(new_token) {
                 break;
             }
 
-            // Decode token to text
             match self.model.token_to_piece(new_token, &mut decoder, true, None) {
                 Ok(piece) => output.push_str(&piece),
-                Err(_) => {} // Skip invalid tokens
+                Err(_) => {}
             }
 
-            // Break on repetition loop: check for repeated short patterns
-            if output.len() > 30 {
-                let check_len = 20.min(output.len() / 2);
-                let tail = &output[output.len() - check_len * 2..];
-                let half = &tail[..check_len];
-                let other_half = &tail[check_len..];
-                if half == other_half {
-                    log::warn!("Repetition loop detected, stopping generation");
-                    output.truncate(output.len() - check_len * 2);
-                    break;
+            // Fast repetition loop detection (char-safe)
+            if output.len() > 60 {
+                // Work with chars to avoid slicing inside multi-byte characters
+                let chars: Vec<char> = output.chars().collect();
+                let n = chars.len();
+                if n > 20 {
+                    let check = 10.min(n / 2);
+                    let a: String = chars[n - check * 2..n - check].iter().collect();
+                    let b: String = chars[n - check..].iter().collect();
+                    if a == b {
+                        log::warn!("Repetition loop detected, stopping");
+                        let keep: String = chars[..n - check * 2].iter().collect();
+                        output = keep;
+                        break;
+                    }
                 }
             }
 
-            // Prepare next iteration
             batch.clear();
             batch
                 .add(new_token, n_cur, &[0], true)
@@ -181,7 +189,7 @@ impl LocalLlmEngine {
             return Err("Model generated empty output".to_string());
         }
 
-        log::info!("Local LLM generated {} chars", result.len());
+        log::info!("Generated {} chars ({} output tokens)", result.len(), n_cur - n_prompt as i32);
         Ok(result)
     }
 
@@ -193,7 +201,6 @@ impl LocalLlmEngine {
         format!("Local LLM ({})", self.model_type.display_name())
     }
 
-    /// Detect Apple Silicon (aarch64 macOS) vs Intel Mac
     fn is_apple_silicon() -> bool {
         cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
     }
@@ -201,3 +208,4 @@ impl LocalLlmEngine {
 
 unsafe impl Send for LocalLlmEngine {}
 unsafe impl Sync for LocalLlmEngine {}
+

@@ -1,8 +1,10 @@
+pub mod app_log;
 pub mod config;
 pub mod dictionary;
 pub mod history;
 pub mod snippets;
 pub mod stats;
+pub mod translation_history;
 
 use std::path::PathBuf;
 

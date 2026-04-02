@@ -1,3 +1,4 @@
+pub mod app_log;
 pub mod audio;
 pub mod file_transcription;
 pub mod integrations;
@@ -8,7 +9,9 @@ pub mod snippets;
 pub mod stats;
 pub mod system_integration;
 pub mod transcription;
+pub mod translation_history;
 
+pub use app_log::*;
 pub use audio::*;
 pub use integrations::*;
 pub use llm::*;
@@ -18,3 +21,4 @@ pub use snippets::*;
 pub use stats::*;
 pub use system_integration::*;
 pub use transcription::*;
+pub use translation_history::*;

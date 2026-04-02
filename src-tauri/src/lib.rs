@@ -105,6 +105,11 @@ pub fn run() {
             commands::reset_stats,
             commands::send_to_apple_notes,
             commands::send_to_obsidian,
+            commands::get_translation_history,
+            commands::clear_translation_history,
+            commands::get_app_logs,
+            commands::clear_app_logs,
+            commands::get_log_file_path,
         ])
         .setup(|app| {
             // Initialiser l'état

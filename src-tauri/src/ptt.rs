@@ -378,6 +378,11 @@ fn stop_ptt_and_paste(app: &tauri::AppHandle) {
 
     let _ = storage::history::add_transcription(result.clone());
 
+    storage::app_log::append_log("info", "transcription", &format!(
+        "Transcription terminée: {} caractères, {:.1}s audio, {}ms traitement",
+        result.text.len(), result.duration_seconds, result.processing_time_ms
+    ));
+
     let final_text = result.text.trim();
     if had_streaming && final_text.len() > streaming_text.len() {
         let remaining = &final_text[streaming_text.len()..];
@@ -436,6 +441,17 @@ fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
             return;
         }
     };
+
+    let char_count = clipboard_text.len();
+    let provider_name = match settings.llm_provider {
+        crate::types::LlmProvider::Local => "local",
+        crate::types::LlmProvider::Groq => "groq",
+    }.to_string();
+    let translation_start = std::time::Instant::now();
+
+    storage::app_log::append_log("info", "translation", &format!(
+        "Traduction demandée: {} caractères vers {} ({})", char_count, language_name, provider_name
+    ));
 
     // Utiliser le LLM local ou Groq selon le provider configuré
     let translated: Result<String, String> = match settings.llm_provider {
@@ -501,21 +517,46 @@ fn translate_clipboard_and_paste(app: &tauri::AppHandle) {
             log::info!("[TRANSLATE] Calling Groq API for translation to {}...", language_name);
 
             rt.block_on(async {
-                crate::llm::groq_client::send_completion(&api_key, &system_prompt, &clipboard_text).await
+                crate::llm::groq_client::send_completion_fast(&api_key, &system_prompt, &clipboard_text).await
                     .map(|t| t.trim().to_string())
                     .map_err(|e| format!("Translation failed: {}", e))
             })
         }
     };
 
+    let translation_time_ms = translation_start.elapsed().as_millis() as u64;
+
     match translated {
-        Ok(text) => {
-            log::info!("[TRANSLATE] Translation successful");
-            paste_text(&text);
-            let _ = app.emit("translation_complete", &text);
+        Ok(ref text) => {
+            log::info!("[TRANSLATE] Translation successful in {}ms", translation_time_ms);
+            paste_text(text);
+
+            let entry = crate::types::TranslationEntry {
+                source_text: clipboard_text.clone(),
+                translated_text: text.clone(),
+                source_language: None,
+                target_language: target_language.clone(),
+                char_count,
+                translation_time_ms,
+                provider: provider_name.clone(),
+                timestamp: chrono::Utc::now().timestamp(),
+            };
+            if let Err(e) = storage::translation_history::add_translation(entry) {
+                log::error!("[TRANSLATE] Failed to save translation history: {}", e);
+            }
+
+            storage::app_log::append_log("info", "translation", &format!(
+                "Traduction réussie: {} -> {} caractères en {}ms ({})",
+                char_count, text.len(), translation_time_ms, provider_name
+            ));
+
+            let _ = app.emit("translation_complete", text.as_str());
         }
-        Err(e) => {
+        Err(ref e) => {
             log::error!("[TRANSLATE] Translation failed: {}", e);
+            storage::app_log::append_log("error", "translation", &format!(
+                "Échec de traduction: {}", e
+            ));
             let _ = app.emit("translation_error", format!("Erreur de traduction: {}", e));
         }
     }

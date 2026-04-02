@@ -441,6 +441,23 @@ pub struct HistoryData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslationEntry {
+    pub source_text: String,
+    pub translated_text: String,
+    pub source_language: Option<String>,
+    pub target_language: String,
+    pub char_count: usize,
+    pub translation_time_ms: u64,
+    pub provider: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TranslationHistoryData {
+    pub translations: Vec<TranslationEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snippet {
     pub id: String,
     pub name: String,

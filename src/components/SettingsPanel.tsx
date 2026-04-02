@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { useSettingsStore } from '../stores/settingsStore';
 import {
   AudioSection,
@@ -33,6 +35,15 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       loadDictionary();
     }
   }, [isOpen, loadSettings, loadDevices, loadDictionary]);
+
+  const handleOpenLogs = useCallback(async () => {
+    try {
+      const logPath = await invoke<string>('get_log_file_path');
+      await openPath(logPath);
+    } catch (e) {
+      console.error('Failed to open log file:', e);
+    }
+  }, []);
 
   if (!isOpen || !settings) return null;
 
@@ -86,7 +97,20 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex-shrink-0 px-6 py-4 bg-[rgba(255,255,255,0.08)] border-t border-[rgba(255,255,255,0.1)]">
+        <div className="flex-shrink-0 px-6 py-4 bg-[rgba(255,255,255,0.08)] border-t border-[rgba(255,255,255,0.1)] space-y-3">
+          <button
+            onClick={handleOpenLogs}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] hover:bg-[rgba(255,255,255,0.1)] hover:border-[rgba(255,255,255,0.2)] transition-all text-[var(--text-secondary)] text-[0.8rem]"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+            Acceder aux logs
+          </button>
           <p className="text-[0.75rem] text-[var(--text-muted)] text-center">
             Phonon v1.0.0 - {settings.engine_type === 'whisper' ? 'Whisper.cpp' : settings.engine_type === 'vosk' ? 'Vosk' : 'Parakeet'}
           </p>
